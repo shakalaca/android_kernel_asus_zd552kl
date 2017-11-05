@@ -2179,19 +2179,20 @@ static const struct file_operations pdaf_i2c_debug_fops = {
 	.release = single_release,
 };
 
-static uint32_t preisp_frame_id;
-static int preisp_frame_id_read(struct seq_file *buf, void *v)
+//ASUS_BSP++, LLHDR
+static uint32_t preisp_vhdr_mode;
+static int preisp_vhdr_mode_read(struct seq_file *buf, void *v)
 {
-	seq_printf(buf,"%d\n",preisp_frame_id);
+	seq_printf(buf,"%d\n",preisp_vhdr_mode);
 	return 0;
 }
 
-static int preisp_frame_id_open(struct inode *inode, struct  file *file)
+static int preisp_vhdr_mode_open(struct inode *inode, struct  file *file)
 {
-	return single_open(file, preisp_frame_id_read, NULL);
+	return single_open(file, preisp_vhdr_mode_read, NULL);
 }
 
-static ssize_t preisp_frame_id_write(struct file *filp, const char __user *buff, size_t len, loff_t *data)
+static ssize_t preisp_vhdr_mode_write(struct file *filp, const char __user *buff, size_t len, loff_t *data)
 {
 	ssize_t ret_len;
 	char messages[32]="";
@@ -2208,21 +2209,153 @@ static ssize_t preisp_frame_id_write(struct file *filp, const char __user *buff,
 
 	sscanf(messages,"%d",&val);
 
-	preisp_frame_id = val;
+	preisp_vhdr_mode = val;
 
-	pr_info("preisp_frame_id set to %d\n",preisp_frame_id);
+	pr_info("preisp_vhdr_mode set to %d\n",preisp_vhdr_mode);
 
 	return ret_len;
 }
-static const struct file_operations preisp_frame_id_debug_fops = {
+static const struct file_operations preisp_vhdr_mode_debug_fops = {
 	.owner = THIS_MODULE,
-	.open = preisp_frame_id_open,
+	.open = preisp_vhdr_mode_open,
 	.read = seq_read,
-	.write = preisp_frame_id_write,
+	.write = preisp_vhdr_mode_write,
 	.llseek = seq_lseek,
 	.release = single_release,
 };
 
+static uint32_t preisp_cframe_id;
+static int preisp_cframe_id_read(struct seq_file *buf, void *v)
+{
+	seq_printf(buf,"%d\n",preisp_cframe_id);
+	return 0;
+}
+
+static int preisp_cframe_id_open(struct inode *inode, struct  file *file)
+{
+	return single_open(file, preisp_cframe_id_read, NULL);
+}
+
+static ssize_t preisp_cframe_id_write(struct file *filp, const char __user *buff, size_t len, loff_t *data)
+{
+	ssize_t ret_len;
+	char messages[32]="";
+	uint32_t val;
+
+	ret_len = len;
+	if (len > 32) {
+		len = 32;
+	}
+	if (copy_from_user(messages, buff, len)) {
+		pr_err("%s command fail !!\n", __func__);
+		return -EFAULT;
+	}
+
+	sscanf(messages,"%d",&val);
+
+	preisp_cframe_id = val;
+
+	pr_info("preisp_cframe_id set to %d\n",preisp_cframe_id);
+
+	return ret_len;
+}
+static const struct file_operations preisp_cframe_id_debug_fops = {
+	.owner = THIS_MODULE,
+	.open = preisp_cframe_id_open,
+	.read = seq_read,
+	.write = preisp_cframe_id_write,
+	.llseek = seq_lseek,
+	.release = single_release,
+};
+
+static uint32_t preisp_pframe_id;
+static int preisp_pframe_id_read(struct seq_file *buf, void *v)
+{
+	seq_printf(buf,"%d\n",preisp_pframe_id);
+	return 0;
+}
+
+static int preisp_pframe_id_open(struct inode *inode, struct  file *file)
+{
+	return single_open(file, preisp_pframe_id_read, NULL);
+}
+
+static ssize_t preisp_pframe_id_write(struct file *filp, const char __user *buff, size_t len, loff_t *data)
+{
+	ssize_t ret_len;
+	char messages[32]="";
+	uint32_t val;
+
+	ret_len = len;
+	if (len > 32) {
+		len = 32;
+	}
+	if (copy_from_user(messages, buff, len)) {
+		pr_err("%s command fail !!\n", __func__);
+		return -EFAULT;
+	}
+
+	sscanf(messages,"%d",&val);
+
+	preisp_pframe_id = val;
+
+	pr_info("preisp_pframe_id set to %d\n",preisp_pframe_id);
+
+	return ret_len;
+}
+static const struct file_operations preisp_pframe_id_debug_fops = {
+	.owner = THIS_MODULE,
+	.open = preisp_pframe_id_open,
+	.read = seq_read,
+	.write = preisp_pframe_id_write,
+	.llseek = seq_lseek,
+	.release = single_release,
+};
+
+static uint32_t preisp_sframe_id;
+static int preisp_sframe_id_read(struct seq_file *buf, void *v)
+{
+	seq_printf(buf,"%d\n",preisp_sframe_id);
+	return 0;
+}
+
+static int preisp_sframe_id_open(struct inode *inode, struct  file *file)
+{
+	return single_open(file, preisp_sframe_id_read, NULL);
+}
+
+static ssize_t preisp_sframe_id_write(struct file *filp, const char __user *buff, size_t len, loff_t *data)
+{
+	ssize_t ret_len;
+	char messages[32]="";
+	uint32_t val;
+
+	ret_len = len;
+	if (len > 32) {
+		len = 32;
+	}
+	if (copy_from_user(messages, buff, len)) {
+		pr_err("%s command fail !!\n", __func__);
+		return -EFAULT;
+	}
+
+	sscanf(messages,"%d",&val);
+
+	preisp_sframe_id = val;
+
+	pr_info("preisp_sframe_id set to %d\n",preisp_sframe_id);
+
+	return ret_len;
+}
+static const struct file_operations preisp_sframe_id_debug_fops = {
+	.owner = THIS_MODULE,
+	.open = preisp_sframe_id_open,
+	.read = seq_read,
+	.write = preisp_sframe_id_write,
+	.llseek = seq_lseek,
+	.release = single_release,
+};
+//ASUS_BSP--, LLHDR
 
 static uint32_t iface_process_frame_id;
 static int iface_process_frame_id_read(struct seq_file *buf, void *v)
@@ -2320,18 +2453,59 @@ static void iface_process_frame_id_create_proc_file(void)
 		pr_info("proc file %s already created!\n",PROC_IFACE_PROCESS_FRAME_ID);
 }
 
-static void preisp_frame_id_create_proc_file(void)
+//ASUS_BSP++, LLHDR
+static void preisp_vhdr_mode_create_proc_file(void)
 {
 	static uint8_t has_created = 0;
 
 	if(!has_created)
 	{
-		create_proc_file(PROC_PREISP_FRAME_ID,&preisp_frame_id_debug_fops);
+		create_proc_file(PROC_PREISP_VHDR_MODE,&preisp_vhdr_mode_debug_fops);
 		has_created = 1;
 	}
 	else
-		pr_info("proc file %s already created!\n",PROC_PREISP_FRAME_ID);
+		pr_info("proc file %s already created!\n",PROC_PREISP_VHDR_MODE);
 }
+
+static void preisp_cframe_id_create_proc_file(void)
+{
+	static uint8_t has_created = 0;
+
+	if(!has_created)
+	{
+		create_proc_file(PROC_PREISP_CFRAME_ID,&preisp_cframe_id_debug_fops);
+		has_created = 1;
+	}
+	else
+		pr_info("proc file %s already created!\n",PROC_PREISP_CFRAME_ID);
+}
+
+static void preisp_pframe_id_create_proc_file(void)
+{
+	static uint8_t has_created = 0;
+
+	if(!has_created)
+	{
+		create_proc_file(PROC_PREISP_PFRAME_ID,&preisp_pframe_id_debug_fops);
+		has_created = 1;
+	}
+	else
+		pr_info("proc file %s already created!\n",PROC_PREISP_PFRAME_ID);
+}
+
+static void preisp_sframe_id_create_proc_file(void)
+{
+	static uint8_t has_created = 0;
+
+	if(!has_created)
+	{
+		create_proc_file(PROC_PREISP_SFRAME_ID,&preisp_sframe_id_debug_fops);
+		has_created = 1;
+	}
+	else
+		pr_info("proc file %s already created!\n",PROC_PREISP_SFRAME_ID);
+}
+//ASUS_BSP--, LLHDR
 #endif
 
 void create_sensor_proc_files(struct msm_sensor_ctrl_t *s_ctrl,struct msm_camera_sensor_slave_info *slave_info)
@@ -2357,8 +2531,13 @@ void create_sensor_proc_files(struct msm_sensor_ctrl_t *s_ctrl,struct msm_camera
 	eeprom_thermal_create_proc_files(slave_info);
 	arcsoft_dualCali_create_proc_file(slave_info);
 #ifdef ZD552KL_PHOENIX
-	preisp_frame_id_create_proc_file();
 	iface_process_frame_id_create_proc_file();
+//ASUS_BSP++, LLHDR
+	preisp_vhdr_mode_create_proc_file();
+	preisp_cframe_id_create_proc_file();
+	preisp_pframe_id_create_proc_file();
+	preisp_sframe_id_create_proc_file();
+//ASUS_BSP--, LLHDR
 	if(g_sensor_ctrl[CAMERA_2])
 	{
 		sensor_i2c_rw_create_proc_file();

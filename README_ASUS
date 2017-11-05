@@ -25,7 +25,7 @@ How to apply patch
 	cd [working dir]/kernel
 	git init
 	git add .
-	git commit -a -m "kernel-11.40.208.44"
+	git commit -a -m "kernel-11.40.208.63"
 
 #2 apply patch to kernel
 # Check each sub-folder in "improvment-patches" folder. Copy .patch file to [working dir]/kernel folder.
