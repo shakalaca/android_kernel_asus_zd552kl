@@ -124,7 +124,7 @@ $(obj)/config_data.h: $(obj)/config_data.gz FORCE
 ###############################################################################
 ifeq ($(CONFIG_SYSTEM_TRUSTED_KEYRING),y)
 X509_CERTIFICATES-y := $(wildcard *.x509) $(wildcard $(srctree)/*.x509)
-#X509_CERTIFICATES-$(CONFIG_MODULE_SIG) += signing_key.x509
+X509_CERTIFICATES-$(CONFIG_MODULE_SIG) += signing_key.x509
 X509_CERTIFICATES-raw := $(sort $(foreach CERT,$(X509_CERTIFICATES-y), \
 				$(or $(realpath $(CERT)),$(CERT))))
 X509_CERTIFICATES := $(subst $(realpath $(objtree))/,,$(X509_CERTIFICATES-raw))
@@ -184,8 +184,8 @@ signing_key.priv signing_key.x509: x509.genkey
 #		-outform DER -out signing_key.x509 \
 #		-keyout signing_key.priv 2>&1
 #############################################################
-#	cp ../../../../../../build/target/product/security/signing_key.x509 signing_key.x509
-#	cp ../../../../../../build/target/product/security/signing_key.priv signing_key.priv
+	cp ../../../../../../build/target/product/security/signing_key.x509 signing_key.x509
+	cp ../../../../../../build/target/product/security/signing_key.priv signing_key.priv
 #ASUS_BSP Ken_Gan --- [BSP][BOOT][SIGN][Modify]use regular key to sign modules
 	@echo "###"
 	@echo "### Key pair generated."

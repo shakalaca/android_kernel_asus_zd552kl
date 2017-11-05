@@ -418,7 +418,7 @@ int  asus_us5587_adc(bool enable)
 	us5587_adc_enable = enable;
 
 	if ((!gpio_is_valid(us5587_chip->adc_en_gpio))) {
-		dev_err(us5587_chip->dev, " %s adc_pwr_en_gpio is not valid!\n", __FUNCTION__);
+		printk(" %s adc_pwr_en_gpio is not valid!\n", __FUNCTION__);
 		goto GPIO_ERR;
 	}
 

@@ -41,7 +41,11 @@ struct gf_key_map
 
 #define  GF_IOC_TOUCH_ENABLE_MASK  _IO(GF_IOC_MAGIC, 14)
 #define  GF_IOC_TOUCH_DISABLE_MASK  _IO(GF_IOC_MAGIC, 13)
+#define  GF_IOC_CLEAN_EARLY_WAKE_HINT  _IO(GF_IOC_MAGIC, 15)
+
 #define  GF_IOC_MAXNR    16
+
+#define GF_EARLY_WAKE   1	/*If support early wake up mechanism.*/
 
 //#define AP_CONTROL_CLK       1
 #define  USE_PLATFORM_BUS     1
@@ -79,6 +83,7 @@ struct gf_dev {
 	struct wake_lock wake_lock;
 
 	bool enable_touch_mask;
+	//bool early_wake_sync;
 	unsigned long FpTimer_expires;
     struct timer_list FpMaskTouch_Timer;
 

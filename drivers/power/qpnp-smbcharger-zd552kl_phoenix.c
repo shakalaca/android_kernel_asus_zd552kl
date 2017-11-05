@@ -603,7 +603,7 @@ enum enable_voters {
 	FAKE_BATTERY_EN_VOTER,
 	ATD_CMD_VOTER,
 	USB_ALERT_VOTER,
-	DEMO_APP_VOTER,
+	DEMO_APP_USB_VOTER,
 	NUM_EN_VOTERS,
 };
 
@@ -614,6 +614,8 @@ enum battchg_enable_voters {
 	BATTCHG_UNKNOWN_BATTERY_EN_VOTER,
 	/*jeita disable battery charging when temp is high*/
 	BATTCHG_JEITA_EN_VOTER,
+	STOP_CHARGING_EN_VOTER,
+	DEMO_APP_VOTER,
 	NUM_BATTCHG_EN_VOTERS,
 };
 
@@ -7408,8 +7410,7 @@ static irqreturn_t aicl_done_handler(int irq, void *_chip)
 		pr_info("AICL done,icl level = %d, reg[0x13F7] = 0x%02X\n", aicl_level, reg);
 		reg &= ICL_STS_MASK;
 		if(reg < 0x09)  //record when current bellow 900mA
-			ASUSErclog(ASUS_AICL_SUSPEND, "AICL  is triggered, ICL=%dmA", 
-				chip->tables.usb_ilim_ma_table[reg]);
+			ASUSErclog(ASUS_AICL_SUSPEND, "Weak Charger is detected");
 		power_supply_changed(&chip->batt_psy);
 	}
 
@@ -8873,6 +8874,80 @@ static void create_asus_vbus_low_impedance_detection_proc_file(void)
 }
 /* --- ASUS_BSP steven1_wang: Add vbus lid support ---*/
 
+static bool stop_charging = false;
+#define STOP_CHARGING_FILE "driver/smbchg_stop_charging"
+static int stop_charging_enable_proc_read(struct seq_file *buf, void *v)
+{
+	if (stop_charging) {
+		seq_printf(buf, "stop charging enable\n");
+	} else{
+		seq_printf(buf, "stop charging disable\n");
+	}
+	return 0;
+}
+
+static ssize_t stop_charging_enable_proc_write(struct file *filp, const char __user *buff,
+		size_t len, loff_t *data)
+{
+	char messages[256];
+	int rc;
+
+	if(!smb_charger_dev){
+		pr_err("smb_charger_dev is NULL in stop charging fun!\n");
+		return len;
+	}
+
+	if (len > 256) {
+		len = 256;
+	}
+
+	if (copy_from_user(messages, buff, len)) {
+		return -EFAULT;
+	}
+
+	if (buff[0] == '1') {
+		stop_charging = true;
+		pr_info("stop_charging_enable: true\n");
+	} else if (buff[0] == '0') {
+		stop_charging = false;
+		pr_info("stop_charging_enable: false\n");
+	}
+
+	rc = vote(smb_charger_dev->battchg_suspend_votable, STOP_CHARGING_EN_VOTER, stop_charging, 0);
+	if(rc){
+		pr_err("set stop charging vote failed!\n");
+	}
+
+	return len;
+}
+
+static int stop_charging_enable_proc_open(struct inode *inode, struct  file *file)
+{
+    return single_open(file, stop_charging_enable_proc_read, NULL);
+}
+
+static const struct file_operations stop_charging_enable_fops = {
+	.owner = THIS_MODULE,
+	.open = stop_charging_enable_proc_open,
+	.write = stop_charging_enable_proc_write,
+	.read = seq_read,
+	.release = single_release,
+};
+
+static void create_stop_charging_enable_proc_file(void)
+{
+	struct proc_dir_entry *stop_charging_enable_proc_file = proc_create(STOP_CHARGING_FILE,
+                        0664, NULL, &stop_charging_enable_fops);
+
+	if (stop_charging_enable_proc_file) {
+		pr_info("create smbchg_stop_charging successed\n");
+	} else{
+		pr_err("create smbchg_stop_charging failed!\n");
+	}
+	return;
+}
+
+
 #ifndef ASUS_FACTORY_BUILD
 #ifndef ASUS_SKU_CN
 //<asus demonapp>
@@ -9044,28 +9119,34 @@ static ssize_t asus_charge_limit_enable_proc_write(struct file *filp, const char
 		if(Check_ADF_Value()){
 			charger_limit_enable = true;
 			charger_flag= true;
+			ASUSErclog(ASUS_DEMO_APP, "start WW Demo APP");
 			pr_info("charge_limit_enable\n");
 		}else{
 			charger_limit_enable = false;
 			charger_flag = true;
 			cancel_delayed_work(&charging_limit_work);
+			ASUSErclog(ASUS_DEMO_APP, "start WW Demo APP Error for check ADF");
 			pr_info("charge_limit_disable_1\n");
 		}
 #else
 		charger_limit_enable = true;
 		charger_flag= true;
+		ASUSErclog(ASUS_DEMO_APP, "start CN Demo APP");
 		pr_info("charge_limit_enable\n");
 #endif
 	} else if(flag == 0) {
 		charger_limit_enable = false;
 		charger_flag = true;
 		cancel_delayed_work(&charging_limit_work);
+		ASUSErclog(ASUS_DEMO_APP, "stop Demo APP");
 		pr_info("charge_limit_disable_0\n");
 	} else {
 		pr_info("%s input error",__FUNCTION__);
 	}
-	if(charger_limit_enable ==0)
-		vote(the_chip->usb_suspend_votable, DEMO_APP_VOTER, 0, 0);
+	if(charger_limit_enable ==0){
+		vote(the_chip->battchg_suspend_votable, DEMO_APP_VOTER, 0, 0);
+		vote(the_chip->usb_suspend_votable, DEMO_APP_USB_VOTER, 0, 0);
+	}
 #endif
 	return len;
 }
@@ -9095,31 +9176,37 @@ void asus_battery_charging_limit(struct work_struct *dat)
 {
 	int percentage;
 	int rc;
+	static bool enable_usb_suspend = false;
 	printk("[%s],charger_limit_enable = %d,charger_limit_setting=%d\n",__FUNCTION__,charger_limit_enable,charger_limit_setting);
 	percentage = get_prop_batt_capacity(the_chip);
 	if (charger_limit_enable) {
 			if (percentage < charger_limit_setting-5) {
-				printk("[%s], percent: %d < charger_limit_setting , enable charging\n", __FUNCTION__, percentage);
 				charger_flag = true;
-			}else if(percentage >= charger_limit_setting){
-				printk("[%s], percent: %d >= charger_limit_setting , disable charging\n", __FUNCTION__, percentage);
+			}else if(percentage > charger_limit_setting){//if percentage>60 usb suspend
+				enable_usb_suspend = true;
+				goto USB_SUSPEND;
+			}else if((percentage >= charger_limit_setting-2) && (percentage <= charger_limit_setting)){//58% ~ 60%
 				charger_flag = false;
-			}else{
-				printk("[%s], percent: charger_limit_setting-5 <%d < charger_limit_setting,now %s\n", 
-					   __FUNCTION__, percentage,(charger_flag ? "charging":"discharging"));
-				
 			}
 	}
 
-	rc = vote(the_chip->usb_suspend_votable, DEMO_APP_VOTER, !charger_flag, 0);
+	enable_usb_suspend = false;
+
+	rc = vote(the_chip->battchg_suspend_votable, DEMO_APP_VOTER, !charger_flag, 0);
 	if(rc < 0)
-		{
-			pr_info("charger usb_suspend disable failed\n");
-		}
-	if(get_prop_batt_status(the_chip)==POWER_SUPPLY_STATUS_CHARGING){
-		charger_limit_update_work(60);
-	}else{
-		charger_limit_update_work(180);}
+	{
+		pr_info("charger batt_suspend disable failed\n");
+	}
+USB_SUSPEND:
+	if(enable_usb_suspend)
+		vote(the_chip->usb_suspend_votable, DEMO_APP_USB_VOTER, 1, 0);
+	else
+		vote(the_chip->usb_suspend_votable, DEMO_APP_USB_VOTER, 0, 0);
+
+	printk("charger_flag=%d;enable_usb_suspend=%d;percentage=%d\n",
+		charger_flag, enable_usb_suspend, percentage);
+
+	charger_limit_update_work(60);
 }
 
 //<ASUS-alexwang20160309-2>support asus factory battery voltage and current++++
@@ -10813,6 +10900,7 @@ static int asus_update_all(struct smbchg_chip *chip,struct battery_info_reply *b
 {
 	int batt_temp;
 	u8 reg;
+	u8 temp[4] = {0};
 
 	batt_info->capacity = get_prop_batt_capacity(chip);
 	batt_info->voltage_now = get_prop_batt_voltage_now(chip)/1000;
@@ -10837,6 +10925,14 @@ static int asus_update_all(struct smbchg_chip *chip,struct battery_info_reply *b
 	batt_info->status = get_prop_batt_status(chip);
 	smbchg_read(chip, &reg, chip->chgr_base + CHGR_STS, 1);
 	pr_smb_rt(PR_STATUS, "CHGR_STS = 0x%02x\n", reg);
+	if((reg & 0x8) == 0x8){
+		smbchg_read(chip, &temp[0], chip->chgr_base + RT_STS, 1); //0x1010
+		smbchg_read(chip, &temp[1], chip->bat_if_base + RT_STS, 1);//0x1210
+		smbchg_read(chip, &temp[2], chip->usb_chgpth_base + RT_STS, 1);//0x1310
+		smbchg_read(chip, &temp[3], chip->misc_base+ RT_STS, 1);//0x1610
+		pr_smb_rt(PR_STATUS, "char=0x%02x;bat=0x%02x;usb=0x%02x;misc=0x%02x\n", temp[0], temp[1], temp[2], temp[3]);
+	}
+
 	return 0;
 }
 
@@ -11525,7 +11621,7 @@ static int smbchg_probe(struct spmi_device *spmi)
 	create_asus_batt_charge_enable_proc_file();
 	create_asus_otg_dcp_proc_file();
     create_asus_vbus_low_impedance_detection_proc_file();/* ASUS_BSP steven1_wang: Add vbus lid support */
-
+	create_stop_charging_enable_proc_file();
 //<ASUS-alexwang20160309-2>support asus factory battery voltage and current++++
 #ifdef ASUS_FACTORY_BUILD
 	create_batt_voltage_proc_file();

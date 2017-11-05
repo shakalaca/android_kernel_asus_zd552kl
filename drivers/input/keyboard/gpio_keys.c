@@ -344,6 +344,7 @@ static void gpio_keys_gpio_report_event(struct gpio_button_data *bdata)
 	printk("[Gpio_keys] %s:keycode=%d  state=%s \n",__func__,
 			button->code,state ? "press" : "release");
 #endif
+	
 	if (type == EV_ABS) {
 		if (state)
 			input_event(input, type, button->code, button->value);
@@ -351,6 +352,8 @@ static void gpio_keys_gpio_report_event(struct gpio_button_data *bdata)
 		input_event(input, type, button->code, !!state);
 	}
 	input_sync(input);
+
+	
 }
 
 static void gpio_keys_gpio_work_func(struct work_struct *work)
@@ -852,11 +855,14 @@ static int gpio_keys_probe(struct platform_device *pdev)
 	}
 #endif					//add by stone1_wang for factory build ---
 
+
+
 	for (i = 0; i < pdata->nbuttons; i++) {
 		const struct gpio_keys_button *button = &pdata->buttons[i];
 		struct gpio_button_data *bdata = &ddata->data[i];
 
 		error = gpio_keys_setup_key(pdev, input, bdata, button);
+		
 		if (error)
 			goto err_setup_key;
 

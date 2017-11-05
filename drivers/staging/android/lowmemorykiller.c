@@ -542,6 +542,17 @@ static unsigned long lowmem_scan(struct shrinker *s, struct shrink_control *sc)
 			//printk("lowmemorykiller: Don't kill media when min_socre_adj > 200\n");
 			continue;
 		}
+		if(strstr(p->comm,"contacts") != NULL && min_score_adj > 200){
+	             task_unlock(p);
+	             //printk("lowmemorykiller: Don't kill contacts when min_socre_adj > 200\n");
+	             continue;
+	      }
+		if(strstr(p->comm,"asusincallui") != NULL && min_score_adj > 200){
+	             task_unlock(p);
+	             //printk("lowmemorykiller: Don't kill asusincall when min_socre_adj > 200\n");
+	             continue;
+		}
+
 		if (oom_score_adj < min_score_adj) {
 			task_unlock(p);
 			continue;

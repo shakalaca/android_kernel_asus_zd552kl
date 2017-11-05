@@ -489,6 +489,7 @@ struct input_keymap_entry {
 #define FRINGERPRINT_TAP 831 // 831
 #define FRINGERPRINT_DTAP 832 // 832
 #define FRINGERPRINT_LONGPRESS 833 // 833
+#define FINGERPRINT_EARLYWAKEUP  834
 // END: keycode for fingerprint gestures
 
 /* Code 255 is reserved for special needs of AT keyboard driver */

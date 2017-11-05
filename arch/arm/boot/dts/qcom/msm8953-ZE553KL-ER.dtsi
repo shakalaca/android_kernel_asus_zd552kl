@@ -701,7 +701,7 @@
                reg = <0x78b5000 0x600>,  <0x7884000 0x1f000>;
                interrupt-names = "spi_irq", "spi_bam_irq";
                interrupts = <0 95 0>, <0 238 0>;
-               spi-max-frequency = <19200000>;
+               spi-max-frequency = <50000000>;
                pinctrl-names = "spi_default", "spi_sleep";
                pinctrl-0 = <&spi0_default &spi0_cs0_active>;
                pinctrl-1 = <&spi0_sleep &spi0_cs0_sleep>;
@@ -719,7 +719,8 @@
 			compatible =  "rockchip,spi_rk_preisp";
 			reg = <0 0x0000>;
 			spi-max-frequency = <19200000>;
-			firmware-nowait-mode = <1>;
+			spi-fw-frequency  = <50000000>;
+			firmware-nowait-mode = <0>;
 			vio-en-gpio = <&tlmm 40 1>;
 			irq-gpio = <&tlmm 17 0>;
 			reset-gpio=<&tlmm 141 0>;

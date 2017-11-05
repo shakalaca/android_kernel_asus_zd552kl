@@ -164,6 +164,10 @@ char *  cmd_to_string( unsigned int cmd)
     case GF_IOC_TOUCH_DISABLE_MASK:
         cmd_string = "GF_IOC_TOUCH_DISABLE_MASK";
         break;
+    case GF_IOC_CLEAN_EARLY_WAKE_HINT:
+        cmd_string = "GF_IOC_CLEAN_EARLY_WAKE_HINT";
+        break;
+
 	default:
 		cmd_string = "default";
 		break;
@@ -512,6 +516,12 @@ static long gf_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		g_FP_Disable_Touch = false;
        //pr_info(" GF_IOC_TOUCH_DISABLE_MASK !\n");
         break;
+    case GF_IOC_CLEAN_EARLY_WAKE_HINT:
+        if(gf_dev->fb_black == 0)
+           pr_info("Screen on, Skip reset wake up hint !\n");
+        //else
+	        //gf_dev->early_wake_sync = 1;
+        break;
 	default:
 		gf_dbg("Unsupport cmd:0x%x\n", cmd);
 		break;
@@ -532,6 +542,18 @@ gf_compat_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 static irqreturn_t gf_irq(int irq, void *handle)
 {
 	struct gf_dev *gf_dev = &gf;
+	printk("gf: %s\n",__func__);
+/*#if GF_EARLY_WAKE
+	if (gf_dev->fb_black & gf_dev->early_wake_sync) {
+		input_report_key(gf_dev->input, FINGERPRINT_EARLYWAKEUP , 1);
+		input_sync(gf_dev->input);
+		mdelay(3);
+		input_report_key(gf_dev->input, FINGERPRINT_EARLYWAKEUP , 0);
+		input_sync(gf_dev->input);
+		gf_dev->early_wake_sync = 0;
+	}
+
+#endif*/
 
 	wake_lock_timeout(&gf_dev->wake_lock,msecs_to_jiffies(1000));
 #ifdef GF_FASYNC
@@ -650,11 +672,14 @@ static int goodix_fb_state_chg_callback(struct notifier_block *nb,
 	struct fb_event *evdata = data;
 	unsigned int blank;
 
+
+
 	if (val != FB_EARLY_EVENT_BLANK)
 		return 0;
 	pr_info("[info] %s go to the goodix_fb_state_chg_callback value = %d\n",
 		__func__, (int)val);
 	gf_dev = container_of(nb, struct gf_dev, notifier);
+
 	if (evdata && evdata->data && val == FB_EARLY_EVENT_BLANK && gf_dev) {
 		blank = *(int *)(evdata->data);
 		switch (blank) {
@@ -665,6 +690,7 @@ static int goodix_fb_state_chg_callback(struct notifier_block *nb,
 //handle frame buffer event to support always on +++
 			if (gf_dev->device_available == 1) {
 				gf_dev->fb_black = 1;
+				//gf_dev->early_wake_sync = 1;
 				g_FP_Disable_Touch = false;
 #ifdef GF_FASYNC
 				if (gf_dev->async) {
@@ -679,6 +705,7 @@ static int goodix_fb_state_chg_callback(struct notifier_block *nb,
 		case FB_BLANK_UNBLANK:
 			if (gf_dev->device_available == 1) {
 				gf_dev->fb_black = 0;
+				//gf_dev->early_wake_sync = 0;
 #ifdef GF_FASYNC
 				if (gf_dev->async) {
 					kill_fasync(&gf_dev->async, SIGIO,
@@ -694,6 +721,7 @@ static int goodix_fb_state_chg_callback(struct notifier_block *nb,
 			break;
 		}
 	}
+
 	return NOTIFY_OK;
 }
 
@@ -712,6 +740,10 @@ static void gf_reg_key_kernel(struct gf_dev *gf_dev)
 
 #ifdef ASUS_FACTORY_BUILD
 	set_bit(KEY_B, gf_dev->input->keybit);
+#endif
+
+#if GF_EARLY_WAKE
+	set_bit(FINGERPRINT_EARLYWAKEUP,gf_dev->input->keybit);
 #endif
 
     gf_dev->input->name = GF_INPUT_NAME;

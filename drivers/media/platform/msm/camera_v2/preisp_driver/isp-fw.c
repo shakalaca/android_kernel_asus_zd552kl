@@ -117,7 +117,7 @@ static int spi_download_section(struct spi_device *spi,
  *
  * It returns zero on success, else a negative error code.
  **/
-int spi_download_fw(struct spi_device *spi, const char *fw_name)
+int spi_download_fw(struct spi_device *spi, const char *fw_name,uint32_t fw_speed,uint32_t normal_speed)
 {
     const struct rkl_header * head;
     const struct firmware *fw;
@@ -138,15 +138,16 @@ int spi_download_fw(struct spi_device *spi, const char *fw_name)
     }
 
     head = (const struct rkl_header *) fw->data;
-
     dev_info(&spi->dev, "request firmware %s (version:%s) success!", fw_name, head->version);
-
+    spi->max_speed_hz = fw_speed;
+    dev_info(&spi->dev, "spi speed set to %d!", fw_speed);
     for (i = 0; i < head->section_count; i++) {
         ret = spi_download_section(spi, fw->data, &head->sections[i]);
         if (ret)
             break;
     }
-
+    spi->max_speed_hz = normal_speed;
+    dev_info(&spi->dev, "spi speed restore to %d!", normal_speed);
 #ifdef ZD552KL_PHOENIX
     if(ret == 0)
         set_fw_revision(head->version);

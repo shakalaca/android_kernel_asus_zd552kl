@@ -42,6 +42,11 @@ if [ -z "$KBUILD_BUILD_TIMESTAMP" ]; then
 else
 	TIMESTAMP=$KBUILD_BUILD_TIMESTAMP
 fi
+
+if [ "$SOURCE_TREE" ==  "CTS" ]; then
+    TIMESTAMP=$TARGET_DATE
+fi
+
 if test -z "$KBUILD_BUILD_USER"; then
 	LINUX_COMPILE_BY=$(whoami | sed 's/\\/\\\\/')
 else

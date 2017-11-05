@@ -171,7 +171,7 @@
  * define your own fw_app, the sample one is invalid
  */
 //<ASUS-BSP Robert_He 20170323> updata touch firmware ++++++
-#define FTS_UPGRADE_FW_APP                      "ASUS_Phoenix_FT3517U_0x01_V0x47_20170701_app.i"
+#define FTS_UPGRADE_FW_APP                      "ASUS_Phoenix_FT3517U_0x01_Shipping_V0x62_20170727_app.i"
 //<ASUS-BSP Robert_He 20170323> updata touch firmware ------
 
 /*

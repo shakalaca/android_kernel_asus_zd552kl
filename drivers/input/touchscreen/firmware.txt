@@ -1,5 +1,5 @@
 ZD552KL firmware:
-       Touch:ASUS_Phoenix_FT3517U_0x01_V0x47_20170701_app.i
+       Touch:ASUS_Phoenix_FT3517U_0x01_Shipping_V0x62_20170727_app.i
        Capsensor:ASUS_Phoenix_FT3267_0x01_V0x28_NON16CH_20170703_app.i
 
 ZE553KL firmware:

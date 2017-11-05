@@ -73,12 +73,15 @@ bool FOCAL_TOUCH_DISABLE = false;
 bool press_touch = false;
 EXPORT_SYMBOL(press_touch);
 //<ASUS-BSP Robert_He 20170508>disable capsensor when press touch ++++++
+
 //<ASUS-BSP Robert_He 20170608> disable touch when proximity is close in call ++++++
 bool PROXIMITY_DISABLE_TOUCH = false;
 //<ASUS-BSP Robert_He 20170608> disable touch when proximity is close in call ------
 //<ASUS-BSP Robert_He 20170609> donot report data when suspend/resume ++++++
 volatile bool suspend_resume_process = false;
 //<ASUS-BSP Robert_He 20170609> donot report data when suspend/resume ------
+int report_touch_locatoin_count[10];
+bool touch_down_up_status = false;
 
 #if FTS_DEBUG_EN
 int g_show_log = 1;
@@ -394,6 +397,8 @@ static void fts_release_all_finger(void)
 #else
     input_mt_sync(fts_input_dev);
 #endif
+    memset(report_touch_locatoin_count,0,sizeof(report_touch_locatoin_count));
+
 //<ASUS-BSP Robert_He 20170609> change release finger function as IC RD surprise++++++
     //input_report_key(fts_input_dev, BTN_TOUCH, 0);
     input_mt_report_pointer_emulation(fts_input_dev, false);
@@ -504,6 +509,7 @@ static int fts_read_touchdata(struct fts_ts_data *data)
 
     for (i = 0; i < FTS_MAX_POINTS; i++) {
         pointid = (buf[FTS_TOUCH_ID_POS + FTS_ONE_TCH_LEN * i]) >> 4;
+				
         if (pointid >= FTS_MAX_ID)
             break;
         else
@@ -527,7 +533,7 @@ static int fts_read_touchdata(struct fts_ts_data *data)
 
         if (0 == event->pressure[i])
             event->pressure[i] = 0x3f;
-
+		
         if ((event->au8_touch_event[i] == 0 || event->au8_touch_event[i] == 2)
             && (event->point_num == 0))
             break;
@@ -601,6 +607,7 @@ static void fts_report_value(struct fts_ts_data *data)
         }
     }
 #if FTS_MT_PROTOCOL_B_EN
+	
     for (i = 0; i < event->touch_point; i++) {
         input_mt_slot(data->input_dev, event->au8_finger_id[i]);
 
@@ -611,7 +618,6 @@ static void fts_report_value(struct fts_ts_data *data)
 //<ASUS-BSP Robert_He 20170508>disable capsensor when press touch ------
 
             input_mt_report_slot_state(data->input_dev, MT_TOOL_FINGER, true);
-
             if (FTS_REPORT_PRESSURE_EN) {
                 if (FTS_FORCE_TOUCH_EN) {
                     if (event->pressure[i] > 0) {
@@ -658,19 +664,26 @@ static void fts_report_value(struct fts_ts_data *data)
                           event->au16_y[i], event->area[i]);
             }
 */
+            report_touch_locatoin_count[i] +=1;
+            if((report_touch_locatoin_count[i]%200)==0)
+            {
+                FTS_INFO("[B]P%d(%d, %d)[tm:%d] DOWN!",event->au8_finger_id[i], event->au16_x[i],event->au16_y[i], event->area[i]);
+                report_touch_locatoin_count[i] = 1;
+            }
         }
         else {
             uppoint++;
             input_mt_report_slot_state(data->input_dev, MT_TOOL_FINGER, false);
             data->touchs &= ~BIT(event->au8_finger_id[i]);
             //FTS_DEBUG("[B]P%d UP!", event->au8_finger_id[i]);
+            report_touch_locatoin_count[i] = 0;
         }
     }
 
     if (unlikely(data->touchs ^ touchs)) {
         for (i = 0; i < data->pdata->max_touch_number; i++) {
             if (BIT(i) & (data->touchs ^ touchs)) {
-                //FTS_DEBUG("[B]P%d UP!", i);
+                FTS_INFO("[Unlikely] : P%d UP!", i);
                 input_mt_slot(data->input_dev, i);
                 input_mt_report_slot_state(data->input_dev, MT_TOOL_FINGER,
                                            false);
@@ -736,14 +749,23 @@ static void fts_report_value(struct fts_ts_data *data)
 
     data->touchs = touchs;
     if (event->touch_point == uppoint) {
-        //FTS_DEBUG("Points All Up!");
 //<ASUS-BSP Robert_He 20170508>disable capsensor when press touch ++++++
         press_touch = false;
 //<ASUS-BSP Robert_He 20170508>disable capsensor when press touch ------
         input_report_key(data->input_dev, BTN_TOUCH, 0);
+        memset(report_touch_locatoin_count,0,sizeof(report_touch_locatoin_count));
+        FTS_INFO("Points All Up!");
+        touch_down_up_status = false;
+
     }
     else {
         input_report_key(data->input_dev, BTN_TOUCH, event->touch_point > 0);
+        if (!touch_down_up_status)
+        {
+            touch_down_up_status = true;
+            FTS_INFO("Touch point down!");
+            FTS_INFO("[B]P%d(%d, %d)[tm:%d] DOWN!",event->au8_finger_id[0], event->au16_x[0],event->au16_y[0], event->area[0]);
+        }
     }
 
     input_sync(data->input_dev);
@@ -1527,6 +1549,7 @@ static int fts_ts_resume(struct device *dev)
 		fts_release_all_finger();
 //<BSP_Robert_he><20170508>should reset when touch is in gesture mode +++ 
 		fts_reset_proc(200);
+        memset(&(fts_wq_data->event),0,sizeof(struct ts_event));
 		fts_tp_state_recovery(data->client);
 //<BSP_Robert_he><20170508>should reset when touch is in gesture mode ---
         data->suspended = false;
@@ -1542,6 +1565,7 @@ static int fts_ts_resume(struct device *dev)
 #if (!FTS_CHIP_IDC)
 //<ASUS-BSP Robert_He 20170502> change reset delay to meet performance need ++++++
     fts_reset_proc(200);
+    memset(&(fts_wq_data->event),0,sizeof(struct ts_event));
 //<ASUS-BSP Robert_He 20170502> change reset delay to meet performance need ++++++
 #endif
 

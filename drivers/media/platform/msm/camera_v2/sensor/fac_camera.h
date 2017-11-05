@@ -116,6 +116,8 @@
 #ifdef ZD552KL_PHOENIX
 #define PROC_SENSOR_I2C_RW "driver/sensor_i2c_rw"
 #define PROC_PDAF_I2C_R "driver/pdaf_i2c_r"
+#define PROC_PREISP_FRAME_ID "driver/preisp_frame_id"
+#define PROC_IFACE_PROCESS_FRAME_ID "driver/iface_process_frame_id"
 #endif
 
 void remove_sensor_proc_files(struct msm_sensor_ctrl_t *s_ctrl);

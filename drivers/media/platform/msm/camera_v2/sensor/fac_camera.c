@@ -2179,6 +2179,95 @@ static const struct file_operations pdaf_i2c_debug_fops = {
 	.release = single_release,
 };
 
+static uint32_t preisp_frame_id;
+static int preisp_frame_id_read(struct seq_file *buf, void *v)
+{
+	seq_printf(buf,"%d\n",preisp_frame_id);
+	return 0;
+}
+
+static int preisp_frame_id_open(struct inode *inode, struct  file *file)
+{
+	return single_open(file, preisp_frame_id_read, NULL);
+}
+
+static ssize_t preisp_frame_id_write(struct file *filp, const char __user *buff, size_t len, loff_t *data)
+{
+	ssize_t ret_len;
+	char messages[32]="";
+	uint32_t val;
+
+	ret_len = len;
+	if (len > 32) {
+		len = 32;
+	}
+	if (copy_from_user(messages, buff, len)) {
+		pr_err("%s command fail !!\n", __func__);
+		return -EFAULT;
+	}
+
+	sscanf(messages,"%d",&val);
+
+	preisp_frame_id = val;
+
+	pr_info("preisp_frame_id set to %d\n",preisp_frame_id);
+
+	return ret_len;
+}
+static const struct file_operations preisp_frame_id_debug_fops = {
+	.owner = THIS_MODULE,
+	.open = preisp_frame_id_open,
+	.read = seq_read,
+	.write = preisp_frame_id_write,
+	.llseek = seq_lseek,
+	.release = single_release,
+};
+
+
+static uint32_t iface_process_frame_id;
+static int iface_process_frame_id_read(struct seq_file *buf, void *v)
+{
+	seq_printf(buf,"%d\n",iface_process_frame_id);
+	return 0;
+}
+
+static int iface_process_frame_id_open(struct inode *inode, struct  file *file)
+{
+	return single_open(file, iface_process_frame_id_read, NULL);
+}
+
+static ssize_t iface_process_frame_id_write(struct file *filp, const char __user *buff, size_t len, loff_t *data)
+{
+	ssize_t ret_len;
+	char messages[32]="";
+	uint32_t val;
+
+	ret_len = len;
+	if (len > 32) {
+		len = 32;
+	}
+	if (copy_from_user(messages, buff, len)) {
+		pr_err("%s command fail !!\n", __func__);
+		return -EFAULT;
+	}
+
+	sscanf(messages,"%d",&val);
+
+	iface_process_frame_id = val;
+
+	//pr_info("iface_process_frame_id set to %d\n",iface_process_frame_id);
+
+	return ret_len;
+}
+static const struct file_operations iface_process_frame_id_debug_fops = {
+	.owner = THIS_MODULE,
+	.open = iface_process_frame_id_open,
+	.read = seq_read,
+	.write = iface_process_frame_id_write,
+	.llseek = seq_lseek,
+	.release = single_release,
+};
+
 static void create_proc_file(const char *PATH,const struct file_operations* f_ops)
 {
 	struct proc_dir_entry *fd;
@@ -2217,6 +2306,32 @@ static void pdaf_i2c_create_proc_file(void)
 	else
 		pr_err("proc file %s already created!\n",PROC_PDAF_I2C_R);
 }
+
+static void iface_process_frame_id_create_proc_file(void)
+{
+	static uint8_t has_created = 0;
+
+	if(!has_created)
+	{
+		create_proc_file(PROC_IFACE_PROCESS_FRAME_ID,&iface_process_frame_id_debug_fops);
+		has_created = 1;
+	}
+	else
+		pr_info("proc file %s already created!\n",PROC_IFACE_PROCESS_FRAME_ID);
+}
+
+static void preisp_frame_id_create_proc_file(void)
+{
+	static uint8_t has_created = 0;
+
+	if(!has_created)
+	{
+		create_proc_file(PROC_PREISP_FRAME_ID,&preisp_frame_id_debug_fops);
+		has_created = 1;
+	}
+	else
+		pr_info("proc file %s already created!\n",PROC_PREISP_FRAME_ID);
+}
 #endif
 
 void create_sensor_proc_files(struct msm_sensor_ctrl_t *s_ctrl,struct msm_camera_sensor_slave_info *slave_info)
@@ -2242,6 +2357,8 @@ void create_sensor_proc_files(struct msm_sensor_ctrl_t *s_ctrl,struct msm_camera
 	eeprom_thermal_create_proc_files(slave_info);
 	arcsoft_dualCali_create_proc_file(slave_info);
 #ifdef ZD552KL_PHOENIX
+	preisp_frame_id_create_proc_file();
+	iface_process_frame_id_create_proc_file();
 	if(g_sensor_ctrl[CAMERA_2])
 	{
 		sensor_i2c_rw_create_proc_file();

@@ -1200,6 +1200,7 @@ static long do_fb_ioctl(struct fb_info *info, unsigned int cmd,
 		console_unlock();
 		break;
 	case FBIOBLANK:
+		printk("[Display] FBIOBLANK(%d)+++\n", (int) arg);
 		console_lock();
 		if (!lock_fb_info(info)) {
 			console_unlock();
@@ -1210,6 +1211,7 @@ static long do_fb_ioctl(struct fb_info *info, unsigned int cmd,
 		info->flags &= ~FBINFO_MISC_USEREVENT;
 		unlock_fb_info(info);
 		console_unlock();
+		printk("[Display] FBIOBLANK(%d)---\n", (int) arg);
 		break;
 	default:
 		fb = info->fbops;

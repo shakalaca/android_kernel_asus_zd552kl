@@ -125,6 +125,8 @@ struct cm36656_info {
 #ifdef CONFIG_HAS_WAKELOCK
 	struct wake_lock ps_wake_lock;
         struct wake_lock ps_irq_wake_lock;
+	struct wake_lock i2c_read_wake_lock;
+	struct wake_lock i2c_write_wake_lock;
 #endif  
 	int psensor_opened;
 	int lightsensor_opened;
@@ -369,8 +371,11 @@ static int _cm36656_I2C_Read_Word(uint16_t slaveAddr, uint8_t cmd, uint16_t *pda
 {
 	uint8_t buffer[2];
 	int ret = 0;
+	struct cm36656_info *lpi = lp_info;
         mutex_lock(&CM36656_i2c_mutex);
+	wake_lock(&lpi->i2c_read_wake_lock);
 	if (pdata == NULL){
+		wake_unlock(&lpi->i2c_read_wake_lock);
 		mutex_unlock(&CM36656_i2c_mutex);
 		return -EFAULT;
 		}
@@ -379,6 +384,7 @@ static int _cm36656_I2C_Read_Word(uint16_t slaveAddr, uint8_t cmd, uint16_t *pda
 		pr_err(
 			"[ALS+PS_ERR][CM36656 error]%s: I2C_RxData fail [0x%x, 0x%x]\n",
 			__func__, slaveAddr, cmd);
+		wake_unlock(&lpi->i2c_read_wake_lock);
 		mutex_unlock(&CM36656_i2c_mutex);
 		return ret;
 	}
@@ -389,6 +395,7 @@ static int _cm36656_I2C_Read_Word(uint16_t slaveAddr, uint8_t cmd, uint16_t *pda
 	printk(KERN_DEBUG "[CM36656] %s: I2C_RxData[0x%x, 0x%x] = 0x%x\n",
 		__func__, slaveAddr, cmd, *pdata);
 #endif
+        wake_unlock(&lpi->i2c_read_wake_lock);
         mutex_unlock(&CM36656_i2c_mutex);
 	return ret;
 }
@@ -397,7 +404,9 @@ static int _cm36656_I2C_Write_Word(uint16_t SlaveAddress, uint8_t cmd, uint16_t 
 {
 	char buffer[3];
 	int ret = 0;
+	struct cm36656_info *lpi = lp_info;
 	 mutex_lock(&CM36656_i2c_mutex);
+	 wake_lock(&lpi->i2c_write_wake_lock);
 #if 0
 	/* Debug use */
 	printk(KERN_DEBUG
@@ -410,9 +419,11 @@ static int _cm36656_I2C_Write_Word(uint16_t SlaveAddress, uint8_t cmd, uint16_t 
 	ret = I2C_TxData(SlaveAddress, buffer, 3);
 	if (ret < 0) {
 		pr_err("[ALS+PS_ERR][CM36656 error]%s: I2C_TxData fail\n", __func__);
+		wake_unlock(&lpi->i2c_write_wake_lock);
 		mutex_unlock(&CM36656_i2c_mutex);
 		return -EIO;
 	}
+	wake_unlock(&lpi->i2c_write_wake_lock);
          mutex_unlock(&CM36656_i2c_mutex);
 	return ret;
 }
@@ -1287,8 +1298,8 @@ static long psensor_ioctl(struct file *file, unsigned int cmd,
 	    lpi->ps_crosstalk_diff = 0;
             //asus20170517 alex wang for psensor CSC autok+++++
              if(lpi->ps_away_thd_set == 10 || lpi->ps_close_thd_set == 999){
-                  PSensor_CALIDATA[1] = lpi->ps_crosstalk+lpi->ps_crosstalk*7/100;
-                  PSensor_CALIDATA[0] = lpi->ps_crosstalk+lpi->ps_crosstalk*20/100;
+                  PSensor_CALIDATA[1] = lpi->ps_crosstalk+30;
+                  PSensor_CALIDATA[0] = lpi->ps_crosstalk+100;
                   lpi->ps_away_thd_set = PSensor_CALIDATA[1];
 	          lpi->ps_close_thd_set = PSensor_CALIDATA[0];
              }
@@ -2709,10 +2720,7 @@ static int cm36656_setup(struct cm36656_info *lpi)
 //asus alex_wang rgb porting----
 	ret = request_any_context_irq(lpi->irq,
 			cm36656_irq_handler,
-			//asus alex_wang +++ low falling and hw irq
-			IRQF_TRIGGER_FALLING | IRQF_ONESHOT,
-			//IRQF_TRIGGER_LOW,
-			//asus alex_wang --- low falling and hw irq
+			IRQF_TRIGGER_LOW | IRQF_ONESHOT,
 			"cm36656",
 			lpi);
 	if (ret < 0) {
@@ -3132,6 +3140,8 @@ lpi->ls_int_source = CM36656_ALS_SOURCE_GREEN;
 #ifdef CONFIG_HAS_WAKELOCK  
 	wake_lock_init(&(lpi->ps_wake_lock), WAKE_LOCK_SUSPEND, "proximity");
         wake_lock_init(&(lpi->ps_irq_wake_lock), WAKE_LOCK_SUSPEND, "proximity_irq");
+	wake_lock_init(&(lpi->i2c_read_wake_lock), WAKE_LOCK_SUSPEND, "cm36656_i2c_read");
+	wake_lock_init(&(lpi->i2c_write_wake_lock), WAKE_LOCK_SUSPEND, "cm36656_i2c_write");
 #endif
 	ret = cm36656_setup(lpi);
 	if (ret < 0) {
@@ -3322,7 +3332,10 @@ err_create_cs_device:
 err_create_class:
 	gpio_free(lpi->intr_pin); //cm36656_setup
 err_cm36656_setup:
-#ifdef CONFIG_HAS_WAKELOCK  
+#ifdef CONFIG_HAS_WAKELOCK
+	wake_lock_destroy(&(lpi->i2c_write_wake_lock));
+	wake_lock_destroy(&(lpi->i2c_read_wake_lock));
+	wake_lock_destroy(&(lpi->ps_irq_wake_lock));
 	wake_lock_destroy(&(lpi->ps_wake_lock));
 #endif  
 	destroy_workqueue(lpi->lp_wq); 
@@ -3618,7 +3631,7 @@ static int cm36656_suspend(struct device *dev)
 	int status_calling;
 	lpi = dev_get_drvdata(dev);
 	status_calling = lpi->ps_enable;
-	pr_err("CM36656:  suspend status=%d\n",lpi->ps_enable);
+	pr_err("CM36656: suspend ps:%d\n",lpi->ps_enable);
 	lpi->status_calling = status_calling;
 	/*
 	  * Save sensor state and disable them,
@@ -3665,7 +3678,7 @@ static int cm36656_resume(struct device *dev)
 	int status_calling;
 	lpi = dev_get_drvdata(dev);
 	status_calling= lpi->status_calling;
-        pr_err("CM36656:  resume  status=%d\n",lpi->ps_enable);
+        pr_err("CM36656:  resume ps:%d\n",lpi->ps_enable);
         if(status_calling){
                  if (proximity_state == 0) {
 			wake_lock_timeout(&(lpi->ps_wake_lock), 1 * HZ);
