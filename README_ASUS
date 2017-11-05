@@ -1,0 +1,34 @@
+How to build zd552kl kernel
+
+#1 download qcom open source code
+	cd [working dir]
+	repo init -u git://codeaurora.org/platform/manifest.git -b release -m LA.UM.5.6.r1-02900-89xx.0.xml
+	repo sync -c
+
+#2 remove some folder
+	rm -rf kernel 
+
+#3 merge source code in device/, kernel/ into [working dir]
+
+
+#4 build kernel image and modules
+#build zd552kl
+rm -rf out
+source build/envsetup.sh
+lunch Z01M-user
+make bootimage
+
+******************************************************************************************************
+How to apply patch
+
+#1 init a git repository in kernel
+	cd [working dir]/kernel
+	git init
+	git add .
+	git commit -a -m "kernel-10.40.0.70"
+
+#2 apply patch to kernel
+# Check each sub-folder in "improvment-patches" folder. Copy .patch file to [working dir]/kernel folder.
+# You can find the corresponding description.docx to know how to apply patch 
+
+	
