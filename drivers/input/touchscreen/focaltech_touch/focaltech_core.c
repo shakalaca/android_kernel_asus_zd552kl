@@ -285,6 +285,51 @@ int fts_reset_proc(int hdelayms)
     return 0;
 }
 
+//<Focal driver-team libaojian 20170828> add irq_lock ++++++
+/*****************************************************************************
+*  Name: fts_irq_disable
+*  Brief: disable irq
+*  Input:
+*   sync:
+*  Output:
+*  Return:
+*****************************************************************************/
+void fts_irq_disable(void)
+{
+    unsigned long irqflags;
+    spin_lock_irqsave(&fts_wq_data->irq_lock, irqflags);
+
+    if (!fts_wq_data->irq_disable)
+    {
+        disable_irq_nosync(fts_wq_data->client->irq);
+        fts_wq_data->irq_disable = 1;
+    }
+
+    spin_unlock_irqrestore(&fts_wq_data->irq_lock, irqflags);
+}
+
+/*****************************************************************************
+*  Name: fts_irq_enable
+*  Brief: enable irq
+*  Input:
+*  Output:
+*  Return:
+*****************************************************************************/
+void fts_irq_enable(void)
+{
+    unsigned long irqflags = 0;
+    spin_lock_irqsave(&fts_wq_data->irq_lock, irqflags);
+
+    if (fts_wq_data->irq_disable)
+    {
+        enable_irq(fts_wq_data->client->irq);
+        fts_wq_data->irq_disable = 0;
+    }
+
+    spin_unlock_irqrestore(&fts_wq_data->irq_lock, irqflags);
+}
+//<Focal driver-team libaojian 20170828> add irq_lock ------
+
 /*****************************************************************************
 * Power Control
 *****************************************************************************/
@@ -771,6 +816,7 @@ static void fts_report_value(struct fts_ts_data *data)
     input_sync(data->input_dev);
 }
 
+#if 0
 /*****************************************************************************
 *  Name: fts_touch_irq_work
 *  Brief:
@@ -799,6 +845,7 @@ static void fts_touch_irq_work(struct work_struct *work)
 #endif
 
 }
+#endif
 
 /*****************************************************************************
 *  Name: fts_ts_interrupt
@@ -810,15 +857,38 @@ static void fts_touch_irq_work(struct work_struct *work)
 static irqreturn_t fts_ts_interrupt(int irq, void *dev_id)
 {
     struct fts_ts_data *fts_ts = dev_id;
+    int ret = -1;
 
     if (!fts_ts) {
         FTS_ERROR("[INTR]: Invalid fts_ts");
         return IRQ_HANDLED;
     }
+    
+#if 0
 //<ASUS-BSP Robert_He 20170428> remove irq enable/disable to solve queue problem ++++++
     //disable_irq_nosync(fts_ts->client->irq);
 //<ASUS-BSP Robert_He 20170428> remove irq enable/disable to solve queue problem ------
     queue_work(fts_ts->ts_workqueue, &fts_ts->touch_event_work);
+#endif
+
+#if FTS_ESDCHECK_EN
+    fts_esdcheck_set_intr(1);
+#endif
+
+    ret = fts_read_touchdata(fts_wq_data);
+//<ASUS-BSP Robert_He 20170609> donot report data when suspend/resume ++++++
+    if (ret == 0 && !suspend_resume_process) {
+        //<Focal driver-team libaojian 20170828> add mutex lock++++++
+        mutex_lock(&fts_wq_data->report_mutex);
+        fts_report_value(fts_wq_data);
+        mutex_unlock(&fts_wq_data->report_mutex);
+        //<Focal driver-team libaojian 20170828> add mutex lock------
+    }
+//<ASUS-BSP Robert_He 20170609> donot report data when suspend/resume ------
+
+#if FTS_ESDCHECK_EN
+    fts_esdcheck_set_intr(0);
+#endif
 
     return IRQ_HANDLED;
 }
@@ -1173,6 +1243,12 @@ static int fts_ts_probe(struct i2c_client *client,
     fts_wq_data = data;
     fts_i2c_client = client;
     fts_input_dev = input_dev;
+    
+//<Focal driver-team libaojian 20170828> add irq_lock and mutex ++++++
+    spin_lock_init(&fts_wq_data->irq_lock);
+    mutex_init(&fts_wq_data->report_mutex);
+//<Focal driver-team libaojian 20170828> add irq_lock and mutex ------
+
     /* Init and register Input device */
     input_dev->name = FTS_DRIVER_NAME;
     input_dev->id.bustype = BUS_I2C;
@@ -1229,6 +1305,7 @@ static int fts_ts_probe(struct i2c_client *client,
 
     fts_wait_tp_to_valid(client);
 
+#if 0
     INIT_WORK(&data->touch_event_work, fts_touch_irq_work);
     data->ts_workqueue = create_workqueue(FTS_WORKQUEUE_NAME);
     if (!data->ts_workqueue) {
@@ -1236,6 +1313,7 @@ static int fts_ts_probe(struct i2c_client *client,
         FTS_ERROR("Create touch workqueue failed");
         goto exit_create_singlethread;
     }
+#endif
 
     fts_ctpm_get_upgrade_array();
 //<ASUS-BSP Robert_He 20170428> change irq low and falling edge trigger to just falling edge trigger ++++++
@@ -1274,6 +1352,10 @@ static int fts_ts_probe(struct i2c_client *client,
 //<ASUS-BSP Robert_He 20170428> remove irq enable/disable to solve queue problem ++++++
     //disable_irq(client->irq);
 //<ASUS-BSP Robert_He 20170428> remove irq enable/disable to solve queue problem ------
+
+//<Focal driver-team libaojian 20170828> add irq_lock ++++++
+    fts_irq_disable();
+//<Focal driver-team libaojian 20170828> add irq_lock------
 
 #if FTS_PSENSOR_EN
     if (fts_sensor_init(data) != 0) {
@@ -1341,7 +1423,13 @@ static int fts_ts_probe(struct i2c_client *client,
     register_early_suspend(&data->early_suspend);
 #endif
 
+#if 0
     enable_irq(client->irq);
+#endif
+    
+//<Focal driver-team libaojian 20170828> add irq_lock ++++++
+    fts_irq_enable();
+//<Focal driver-team libaojian 20170828> add irq_lock------
 
     FTS_FUNC_EXIT();
     return 0;
@@ -1381,7 +1469,9 @@ static int fts_ts_remove(struct i2c_client *client)
 
     FTS_FUNC_ENTER();
     cancel_work_sync(&data->touch_event_work);
+#if 0
     destroy_workqueue(data->ts_workqueue);
+#endif
 
 #if FTS_PSENSOR_EN
     fts_sensor_remove(data);

@@ -3693,6 +3693,9 @@ static int smbchg_icl_loop_disable_check(struct smbchg_chip *chip)
 	return rc;
 }
 
+extern char *fg_batt_type;
+extern bool enable_float_vol;
+
 #define UNKNOWN_BATT_TYPE	"Unknown Battery"
 #define LOADING_BATT_TYPE	"Loading Battery Data"
 static int smbchg_config_chg_battery_type(struct smbchg_chip *chip)
@@ -3713,9 +3716,14 @@ static int smbchg_config_chg_battery_type(struct smbchg_chip *chip)
 		pr_smb(PR_MISC, "Battery-type not identified\n");
 		return 0;
 	}
+
 	/* quit if there is no change in the battery-type from previous */
-	if (chip->battery_type && !strcmp(prop.strval, chip->battery_type))
-		return 0;
+	if (chip->battery_type && !strcmp(prop.strval, chip->battery_type)){
+		if(enable_float_vol && fg_batt_type)
+			enable_float_vol = false;
+		else
+			return 0;
+	}
 
 	batt_node = of_parse_phandle(node, "qcom,battery-data", 0);
 	if (!batt_node) {
@@ -3724,11 +3732,12 @@ static int smbchg_config_chg_battery_type(struct smbchg_chip *chip)
 	}
 
 	profile_node = of_batterydata_get_best_profile(batt_node,
-							"bms", NULL);
+							"bms", fg_batt_type);
 	if (!profile_node) {
 		pr_err("couldn't find profile handle\n");
 		return -EINVAL;
 	}
+
 	chip->battery_type = prop.strval;
 
 	/* change vfloat */
@@ -3749,6 +3758,8 @@ static int smbchg_config_chg_battery_type(struct smbchg_chip *chip)
 				"Couldn't set float voltage rc = %d\n", rc);
 				return rc;
 			}
+
+			chip->asus_tb.fv_cfg = max_voltage_uv/1000;
 		}
 	}
 
@@ -6346,11 +6357,6 @@ static int smbchg_system_temp_level_set(struct smbchg_chip *chip,
 		lvl_sel = chip->thermal_levels - 1;
 	}
 
-	if((chip->therm_lvl_sel == 1) && (!asus_is_type_should_thermal_policy(chip))){
-		printk("[CHARGE]type should not do thermal policy\n");
-		return 0;
-	}
-
 	if (lvl_sel == chip->therm_lvl_sel){
 		printk("[BATT]same therm_lvl_sel =%d\n",lvl_sel);
 		return 0;
@@ -6359,6 +6365,12 @@ static int smbchg_system_temp_level_set(struct smbchg_chip *chip,
 	mutex_lock(&chip->therm_lvl_lock);
 	prev_therm_lvl = chip->therm_lvl_sel;
 	chip->therm_lvl_sel = lvl_sel;
+
+	if((chip->therm_lvl_sel == 1) && (!asus_is_type_should_thermal_policy(chip))){
+		printk("[CHARGE]type should not do thermal policy\n");
+		goto LVL1;
+	}
+
 	printk("[BATT]prev_therm_lvl = %d, now_therm_lvl =%d\n",prev_therm_lvl,chip->therm_lvl_sel);
 	if (chip->therm_lvl_sel == (chip->thermal_levels - 1)) {
 		/*
@@ -6436,7 +6448,7 @@ static int smbchg_system_temp_level_set(struct smbchg_chip *chip,
 				pr_err("Couldn't vote for USB thermal ICL rc=%d\n", rc);
 			}
 	}
-
+LVL1:
 	if (prev_therm_lvl == chip->thermal_levels - 1) {
 		/*
 		 * If previously highest value was selected charging must have
@@ -10195,7 +10207,7 @@ static void asus_handler_usb_removal(struct smbchg_chip *chip)
 
 	phy_detect_float_ok =false;
 	asus_QC3_rerun_apsd = 0;
-	chip->therm_lvl_sel=0;
+//	chip->therm_lvl_sel=0;
 	chip->read_adc_ignore = false;
 	chip->usb_connector_event = false;
 	//liquid_flag = false;
@@ -11258,6 +11270,20 @@ static void create_asus_rerun_apsd_proc_file(void)
 	} else{
 		printk("[BAT][CHG][SMB][Proc]ASUS_RERUN_APSD_PROC_FILE create failed!\n");
 	}
+}
+
+bool asus_full_charger_judge(void)
+{
+	u8 reg;
+	if(!smb_charger_dev){
+		pr_err("smb charger dev is NULL,Now return!\n");
+		return false;
+	}
+	smbchg_read(smb_charger_dev, &reg, 0x1010, 1);
+	if((reg & BIT(7)) == BIT(7))
+		return true;
+	else
+		return false;
 }
 
 static int smbchg_probe(struct spmi_device *spmi)

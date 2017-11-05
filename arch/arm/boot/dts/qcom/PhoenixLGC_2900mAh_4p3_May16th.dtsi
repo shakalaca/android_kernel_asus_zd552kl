@@ -1,0 +1,50 @@
+
+qcom,2938522_asus_phoenixlgc_2900mah_averaged_masterslave_may16th2017_430 {
+	/* #2938522_Asus_PhoenixLGC_2900mAh_averaged_MasterSlave_May16th2017*/
+	qcom,max-voltage-uv = <4300000>;
+	qcom,fg-cc-cv-threshold-mv = <4270>;
+	qcom,nom-batt-capacity-mah = <2900>;
+	qcom,batt-id-kohm = <10>;
+	qcom,battery-beta = <3380>;
+	qcom,battery-type = "asus_phoenix_2900mah_10k_430";
+	qcom,chg-rslow-comp-c1 = <2329523>;
+	qcom,chg-rslow-comp-c2 = <2022306>;
+	qcom,chg-rs-to-rslow = <1603171>;
+	qcom,chg-rslow-comp-thr = <0x99>;
+	qcom,checksum = <0x5E1E>;
+	qcom,gui-version = "PMI8950GUI - 2.0.0.16";
+	qcom,fg-profile-data = [
+		 ED 83 23 7D 
+		 22 81 7A 77 
+		 6D 83 62 76 
+		 48 8A D8 94 
+		 32 82 C1 98 
+		 66 B6 C3 C1 
+		 5A 15 3E 83 
+		 19 68 DD 6A 
+		 BF 48 3F 83 
+		 3E 73 E5 7C 
+		 4A 6A 62 82 
+		 43 98 22 B6 
+		 EF C1 70 13 
+		 0E 0B 49 59 
+		 D3 6D 29 FC 
+		 35 45 4E 45 
+		 3A 42 00 00 
+		 C5 3F FF 3B 
+		 1D 2E 00 00 
+		 00 00 00 00 
+		 00 00 00 00 
+		 AF 72 4A 71 
+		 47 68 3B 7B 
+		 21 6F 52 59 
+		 79 70 89 80 
+		 6D 6C 62 4E 
+		 D5 53 F3 A0 
+		 21 32 63 02 
+		 64 A0 71 0C 
+		 28 00 FF 36 
+		 F0 11 30 03 
+		 00 00 00 0C 
+	];
+};

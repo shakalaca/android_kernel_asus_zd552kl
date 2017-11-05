@@ -473,6 +473,10 @@
 		qcom,batt-id-range-pct = <15>;
 		#include "2377156_Asus_Phoenix8953_2900mAh_averaged_MasterSlave_Apr29th2016_PMI8952GUI20015.dtsi"
 		#include "2387485_Asus_Phoenix8953lgc_2900mAh_averaged_MasterSlave_May3rd2016_PMI8952GUI20015.dtsi"
+		#include "PhoenixCos_2900mAh_4p3_May17th.dtsi"
+		#include "PhoenixCos_2900mAh_4p25_May17th.dtsi"
+		#include "PhoenixLGC_2900mAh_4p3_May16th.dtsi"
+		#include "PhoenixLGC_2900mAh_4p25_May16th.dtsi"
 	};
 };
 

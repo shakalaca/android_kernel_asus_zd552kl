@@ -330,7 +330,7 @@ module_param_named(
 	first_est_dump, fg_est_dump, int, S_IRUSR | S_IWUSR
 );
 
-static char *fg_batt_type;
+char *fg_batt_type;
 module_param_named(
 	battery_type, fg_batt_type, charp, S_IRUSR | S_IWUSR
 );
@@ -538,6 +538,7 @@ struct fg_chip {
 	u32			cc_cv_threshold_mv;
 	unsigned int		batt_profile_len;
 	unsigned int		batt_max_voltage_uv;
+	unsigned int		asus_batt_id;
 	const char		*batt_type;
 	const char		*batt_psy_name;
 	unsigned long		last_sram_update_time;
@@ -616,6 +617,66 @@ struct fg_chip {
 	struct delayed_work	check_sanity_work;
 	struct fg_wakeup_source	sanity_wakeup_source;
 	u8			last_beat_count;
+	unsigned long condition1_battery_time;
+	unsigned long condition2_battery_time;
+	int condition1_cycle_count;
+	int condition2_cycle_count;
+	unsigned long condition1_temp_vol_time;
+	unsigned long condition2_temp_vol_time;
+	unsigned long condition1_temp_time;
+	unsigned long condition2_temp_time;
+	unsigned long condition1_vol_time;
+	unsigned long condition2_vol_time;
+};
+
+/* Cycle Count Date Structure saved in emmc
+ * magic - magic number for data verification
+ * charge_cap_accum - Accumulated charging capacity
+ * charge_last_soc - last saved soc before reset/shutdown
+ * [0]:battery_soc [1]:system_soc [2]:monotonic_soc
+ */
+struct CYCLE_COUNT_DATA{
+	int magic;
+	int charge_cap_accum[3];
+	int charge_last_soc[3];
+	unsigned long battery_total_time;
+	unsigned long high_vol_total_time;
+	unsigned long high_temp_total_time;
+	unsigned long high_temp_vol_time;
+	u32 reload_condition;
+};
+
+#define CYCLE_COUNT_DATA_MAGIC  0x85
+#define CYCLE_COUNT_FILE_NAME   "/dev/block/platform/soc/7824900.sdhci/by-name/fsc_old"
+static struct CYCLE_COUNT_DATA g_cycle_count_data = {
+    .magic = CYCLE_COUNT_DATA_MAGIC,
+    .charge_cap_accum = {0},
+    .charge_last_soc = {0},
+    .battery_total_time = 0,
+    .high_vol_total_time = 0,
+    .high_temp_total_time = 0,
+    .high_temp_vol_time = 0,
+    .reload_condition = 0
+};
+
+#define HIGH_TEMP   350
+#define HIGHER_TEMP 450
+#define FULL_CAPACITY_VALUE 100
+#define BATTERY_USE_TIME_CONDITION1  (3*30*24*60*60) //3Months
+#define BATTERY_USE_TIME_CONDITION2  (6*30*24*60*60) //6Months
+#define CYCLE_COUNT_CONDITION1  100
+#define CYCLE_COUNT_CONDITION2  400
+#define HIGH_TEMP_VOL_TIME_CONDITION1 (15*24*60*60)  //15Days
+#define HIGH_TEMP_VOL_TIME_CONDITION2 (30*24*60*60)  //30Days
+#define HIGH_TEMP_TIME_CONDITION1     (3*30*24*60*60) //3Months
+#define HIGH_TEMP_TIME_CONDITION2     (6*30*24*60*60) //6Months
+#define HIGH_VOL_TIME_CONDITION1     (3*30*24*60*60) //3Months
+#define HIGH_VOL_TIME_CONDITION2     (6*30*24*60*60) //6Months
+
+enum calculation_time_type {
+	HIGH_VOL_CAL_TYPE,
+	HIGH_TEMP_CAL_TYPE,
+	HIGH_TEMP_VOL_CAL_TYPE,
 };
 
 /* FG_MEMIF DEBUGFS structures */
@@ -632,6 +693,11 @@ static const char *loading_batt_type	= "Loading Battery Data";
 static const char *missing_batt_type	= "Disconnected Battery";
 
 struct fg_chip *chip_oem = NULL;
+static void update_battery_safe(struct fg_chip *chip);
+static int asus_battery_profile_init_work(struct fg_chip *chip);
+bool enable_float_vol = false;
+extern bool rtc_probe_done;
+static int g_cyclecount_initialized = 0;
 
 /* Log buffer */
 struct fg_log_buffer {
@@ -2230,7 +2296,6 @@ static int Usoc_mapping(int old_msoc,int msoc)
 	return Usoc;
 }
 
-#define BATTERY_BACKUP_FILE  		"/asdf/gaugeMappingBackup"
 static int init_asus_capacity(void)
 {
 	struct file *fp = NULL;
@@ -2240,9 +2305,9 @@ static int init_asus_capacity(void)
 	int l_result = -1;
 	int readlen = 0;
 
-	fp = filp_open(BATTERY_BACKUP_FILE, O_RDONLY , S_IRWXU | S_IRWXG | S_IRWXO);
+	fp = filp_open(CYCLE_COUNT_FILE_NAME, O_RDONLY , S_IRWXU | S_IRWXG | S_IRWXO);
 	if (IS_ERR_OR_NULL(fp)) {
-		pr_info("%s: open (%s) fail\n", __func__, BATTERY_BACKUP_FILE);
+		pr_info("%s: open (%s) fail\n", __func__, CYCLE_COUNT_FILE_NAME);
 		return -ENOENT;	/*No such file or directory*/
 	}
 
@@ -2250,8 +2315,10 @@ static int init_asus_capacity(void)
 	old_fs = get_fs();
 	set_fs(KERNEL_DS);
 
+	//lseek(fp, sizeof(struct CYCLE_COUNT_DATA), SEEK_SET);
+
 	if (fp->f_op != NULL && fp->f_op->read != NULL) {
-		pos_lsts = 0;
+		pos_lsts = sizeof(struct CYCLE_COUNT_DATA)+4;
 		readlen = fp->f_op->read(fp, buf, 6, &pos_lsts);
 		buf[readlen] = '\0';
 	} else {
@@ -2281,9 +2348,9 @@ static int backup_asus_capacity(int input)
 
 	sprintf(buf, "%d", input);
 
-	fp = filp_open(BATTERY_BACKUP_FILE, O_RDWR | O_CREAT | O_TRUNC, S_IRWXU | S_IRWXG | S_IRWXO);
+	fp = filp_open(CYCLE_COUNT_FILE_NAME, O_RDWR | O_CREAT | O_TRUNC, S_IRWXU | S_IRWXG | S_IRWXO);
 	if (IS_ERR_OR_NULL(fp)) {
-		pr_info("%s: open (%s) fail\n", __func__, BATTERY_BACKUP_FILE);
+		pr_info("%s: open (%s) fail\n", __func__, CYCLE_COUNT_FILE_NAME);
 		return -1;
 	}
 
@@ -2291,9 +2358,11 @@ static int backup_asus_capacity(int input)
 	old_fs = get_fs();
 	set_fs(KERNEL_DS);
 
+	//lseek(fp, sizeof(struct CYCLE_COUNT_DATA), SEEK_SET);
+
 	if (fp->f_op != NULL && fp->f_op->write != NULL) {
-		pos_lsts = 0;
-		fp->f_op->write(fp, buf, strlen(buf), &fp->f_pos);
+		pos_lsts = sizeof(struct CYCLE_COUNT_DATA)+4;
+		fp->f_op->write(fp, buf, strlen(buf), &pos_lsts);
 	} else {
 		pr_info("%s: f_op=NULL or op->write=NULL\n", __func__);
 		return -2;
@@ -2491,7 +2560,7 @@ static int get_prop_capacity(struct fg_chip *chip)
 			pr_info("relax keep 100\n");
 		}
 		charge_full_status = 1;
-		pr_info_ratelimited("soc_raw:%d\n",soc_raw_optimize(chip));
+		//pr_info_ratelimited("soc_raw:%d\n",soc_raw_optimize(chip));
 		return FULL_CAPACITY;
 	}
 
@@ -2556,7 +2625,7 @@ static int get_prop_capacity(struct fg_chip *chip)
 	} else if (msoc == FULL_SOC_RAW) {
 		return FULL_CAPACITY;
 	}
-	pr_info_ratelimited("Rsoc:%d Usoc:%d\n",(DIV_ROUND_CLOSEST((msoc - 1) * 98, 253) + 1),FinalUsoc);
+	//pr_info_ratelimited("Rsoc:%d Usoc:%d\n",(DIV_ROUND_CLOSEST((msoc - 1) * 98, 253) + 1),FinalUsoc);
 	if( (FinalUsoc >= 0) && (FinalUsoc <= 100) )
 		return FinalUsoc;
 	else
@@ -2894,6 +2963,12 @@ static int update_sram_data(struct fg_chip *chip, int *resched_ms)
 			pr_info("%d %lld %d\n", i, temp, fg_data[i].value);
 	}
 	fg_mem_release(chip);
+
+	//if reload condition equal 2 can not need to update
+	if(g_cycle_count_data.reload_condition < 2 &&
+		rtc_probe_done == true && g_cyclecount_initialized){ //wait rtc probe ok can read rtc time
+		update_battery_safe(chip);
+	}
 
 	/* Backup the registers whenever no error happens during update */
 	if (fg_reset_on_lockup && !chip->ima_error_handling) {
@@ -3236,38 +3311,18 @@ static int fg_inc_store_cycle_ctr(struct fg_chip *chip, int bucket)
 	return rc;
 }
 /* ASUS_BSP steven1_wang: Calculate and store battery cycle count+++ */
-#define CYCLE_FULL_THRESH_DEFAULT   85 // 85% as one full cycle
+#define CYCLE_FULL_THRESH_DEFAULT   95 // 85% as one full cycle
 #define CYCLE_SOC_FULL  0xFF
 #define CYCLE_COUNT_WRITEBACK_THRESH  	25 // 9.8%
 #define CYCLE_SYSTEM_SOC_REG		0x574
 #define CYCLE_SYSTEM_SOC_OFFSET	0
 #define CYCLE_MONO_SOC_REG		0x574
 #define CYCLE_MONO_SOC_OFFSET	2
-#define CYCLE_COUNT_FILE_NAME   "/dev/block/platform/soc/7824900.sdhci/by-name/fsc_old"
 #define FILE_OP_READ   0
 #define FILE_OP_WRITE   1
-#define CYCLE_COUNT_DATA_MAGIC  0x85
-#define CYCLE_COUNT_DATA_OFFSET  0x00
+#define CYCLE_COUNT_DATA_OFFSET  0x0
 
-/* Cycle Count Date Structure saved in emmc
- * magic - magic number for data verification
- * charge_cap_accum - Accumulated charging capacity
- * charge_last_soc - last saved soc before reset/shutdown
- * [0]:battery_soc [1]:system_soc [2]:monotonic_soc
- */
-struct CYCLE_COUNT_DATA{
-	int magic;
-	int charge_cap_accum[3];
-	int charge_last_soc[3];
-};
-
-static struct CYCLE_COUNT_DATA g_cycle_count_data = {
-    .magic = CYCLE_COUNT_DATA_MAGIC,
-    .charge_cap_accum = {0},
-    .charge_last_soc = {0}
-};
 static int g_full_cycle_thresh = CYCLE_FULL_THRESH_DEFAULT;
-static int g_cyclecount_initialized = 0;
 static int g_bootup_soc[3];
 
 static int file_op(const char *filename, loff_t offset, char *buf, int length, int operation)
@@ -3313,14 +3368,15 @@ static int init_batt_cycle_count(void)
 	/* Read cycle count data from emmc */
 	rc = file_op(CYCLE_COUNT_FILE_NAME, CYCLE_COUNT_DATA_OFFSET,
 		(char*)&buf, sizeof(struct CYCLE_COUNT_DATA), FILE_OP_READ);
-	if(rc <0) {
+	if(rc < 0) {
 		pr_err("Read cycle count file failed!\n");
-		return 0;
+		return rc;
 	}
 
 	/* Check data validation */
 	if(buf.magic != CYCLE_COUNT_DATA_MAGIC) {
 		pr_err("Cycle count data not exist or invalid, use current data\n");
+		return -1;
 	}
 	else {
 		/* Update current value */
@@ -3331,10 +3387,18 @@ static int init_batt_cycle_count(void)
 			if(buf.charge_last_soc[i] < g_bootup_soc[i])
 				g_cycle_count_data.charge_cap_accum[i] += (g_bootup_soc[i] - buf.charge_last_soc[i]);
 		}
+
+		g_cycle_count_data.high_temp_total_time += buf.high_temp_total_time;
+		g_cycle_count_data.high_temp_vol_time += buf.high_temp_vol_time;
+		g_cycle_count_data.high_vol_total_time += buf.high_vol_total_time;
+		g_cycle_count_data.reload_condition = buf.reload_condition;
+		g_cycle_count_data.battery_total_time += buf.battery_total_time;
+		pr_info("reload_condition=%d;high_temp_total_time=%lu;high_temp_vol_time=%lu;high_vol_total_time=%lu;battery_total_time=%lu\n",
+			buf.reload_condition, buf.high_temp_total_time,buf.high_temp_vol_time,buf.high_vol_total_time,buf.battery_total_time);
 	}
 	pr_info("Cycle count data initialize success!\n");
 	g_cyclecount_initialized = 1;
-	return 1;
+	return 0;
 }
 
 static void write_back_cycle_count_data(void)
@@ -6267,20 +6331,25 @@ fail:
 #define BATTERY_PSY_WAIT_MS		2000
 extern bool g_Charger_mode;
 /* +++ ASUS_BSP steven1_wang: Add for UI battery version +++*/
-#define ASUS_BATT_PACK_MAX_COUNT   2
+#define ASUS_BATT_PACK_MAX_COUNT   6
+#define ASUS_VERSION_MAX_COUNT	2
 #define ASUS_BATT_TYPE_STR_MAXLEN   50
 #define ASUS_BATT_VERSION_STR_MAXLEN   ASUS_BATT_TYPE_STR_MAXLEN
 static const char * g_battery_version = NULL;
 /* qcom,battery-type in batt profile dtsi */
 static const char asus_batt_type_str[ASUS_BATT_PACK_MAX_COUNT][ASUS_BATT_TYPE_STR_MAXLEN] = {
     {"asus_phoenix_2900mah_10k"},/* LG */
-    {"asus_phoenix_2900mah_100k"}/* Coslight */
+	{"asus_phoenix_2900mah_10k_430"},/* LG  4.30V*/
+	{"asus_phoenix_2900mah_10k_425"},/*LG 4.25V*/
+    {"asus_phoenix_2900mah_100k"},/* Coslight */
+    {"asus_phoenix_2900mah_100k_430"},/* Coslight 4.30V*/
+    {"asus_phoenix_2900mah_100k_425"} /* Coslight 4.25V*/
 };
 /* UI Hardware Information -> Battery version */
-static const char asus_batt_version_str[ASUS_BATT_PACK_MAX_COUNT][ASUS_BATT_VERSION_STR_MAXLEN] = {
+static const char asus_batt_version_str[ASUS_VERSION_MAX_COUNT][ASUS_BATT_VERSION_STR_MAXLEN] = {
     /* model - cell - id - profile - version */
-    {"C11P1511-G-02-0001-3.1.10.55"},/* LG */
-    {"C11P1511-O-03-0002-3.1.10.55"}/* Coslight */
+    {"C11P1511-G-02-0001-3.1.10.206"},/* LG */
+    {"C11P1511-O-03-0002-3.1.10.206"},/* Coslight */
 };
 /* --- ASUS_BSP steven1_wang: Add for UI battery version --- */
 static int fg_batt_profile_init(struct fg_chip *chip)
@@ -6294,6 +6363,7 @@ static int fg_batt_profile_init(struct fg_chip *chip)
 	u8 reg = 0;
     int i;
 	static u8 ReadBackupCapacityCount = 0;
+	static u8 battery_profile_count = 0;
 
 wait:
 	fg_stay_awake(&chip->profile_wakeup_source);
@@ -6320,6 +6390,17 @@ wait:
 	if (fg_debug_mask & FG_STATUS)
 		pr_info("battery id = %d\n",
 				get_sram_prop_now(chip, FG_DATA_BATT_ID));
+
+	rc = asus_battery_profile_init_work(chip);
+	if(rc < 0){
+		battery_profile_count++;
+		if(battery_profile_count <= 15){ //delay 6*BATTERY_PSY_WAIT_MS
+			pr_info("battery file not ready, retray %d\n",battery_profile_count);
+			goto reschedule;
+		}
+		battery_profile_count = 0;
+	}
+
 	profile_node = of_batterydata_get_best_profile(batt_node, "bms",
 							fg_batt_type);
 	if (!profile_node) {
@@ -6363,6 +6444,11 @@ wait:
 
 	if (rc)
 		pr_warn("couldn't find battery max voltage\n");
+
+	rc = of_property_read_u32(profile_node, "qcom,batt-id-kohm",
+					&chip->asus_batt_id);
+	if(rc)
+		pr_warn("couldn't find batt id kohm!\n");
 
 	/*
 	 * Only configure from profile if fg-cc-cv-threshold-mv is not
@@ -6450,7 +6536,7 @@ wait:
 		filedata = init_asus_capacity();
 		if(filedata <= 0){ //read file fail
 			ReadBackupCapacityCount++;
-			if(ReadBackupCapacityCount <= 15){ //delay 6*BATTERY_PSY_WAIT_MS
+			if(ReadBackupCapacityCount <= 3){ //delay 3*BATTERY_PSY_WAIT_MS
 				pr_info("gauge backup file not ready, retray %d\n",ReadBackupCapacityCount);
 				goto reschedule;
 			}
@@ -6559,8 +6645,8 @@ done:
 		chip->batt_type = batt_type_str;
 /* +++ ASUS_BSP steven1_wang: Add for UI battery version +++*/
     for(i = 0; i < ASUS_BATT_PACK_MAX_COUNT; i++) {
-        if(0 == strncmp(batt_type_str, asus_batt_type_str[i], strlen(asus_batt_type_str[i]))) {
-            g_battery_version = asus_batt_version_str[i];
+        if(0 == strncmp(chip->batt_type, asus_batt_type_str[i], strlen(asus_batt_type_str[i]))) {
+            g_battery_version = asus_batt_version_str[i/3];
             pr_info("Battery version: %s\n", g_battery_version);
             break;
         }
@@ -7482,6 +7568,12 @@ static int fg_remove(struct spmi_device *spmi)
 
 	fg_cleanup(chip);
 	dev_set_drvdata(&spmi->dev, NULL);
+
+	if(fg_batt_type){
+		kfree(fg_batt_type);
+		fg_batt_type = NULL;
+	}
+
 	return 0;
 }
 
@@ -8621,6 +8713,20 @@ done:
 	fg_cleanup(chip);
 }
 
+static void init_battery_safety(struct fg_chip *chip)
+{
+	chip->condition1_battery_time = BATTERY_USE_TIME_CONDITION1;
+	chip->condition2_battery_time = BATTERY_USE_TIME_CONDITION2;
+	chip->condition1_cycle_count = CYCLE_COUNT_CONDITION1;
+	chip->condition2_cycle_count = CYCLE_COUNT_CONDITION2;
+	chip->condition1_temp_vol_time = HIGH_TEMP_VOL_TIME_CONDITION1;
+	chip->condition2_temp_vol_time = HIGH_TEMP_VOL_TIME_CONDITION2;
+	chip->condition1_temp_time = HIGH_TEMP_TIME_CONDITION1;
+	chip->condition2_temp_time = HIGH_TEMP_TIME_CONDITION2;
+	chip->condition1_vol_time = HIGH_VOL_TIME_CONDITION1;
+	chip->condition2_vol_time = HIGH_VOL_TIME_CONDITION2;
+}
+
 //Add factory node for gauge status
 static int gauge_proc_read(struct seq_file *buf, void *data)
 {
@@ -8735,6 +8841,11 @@ static int cycle_count_proc_show(struct seq_file *buf, void *data)
 	seq_printf(buf, "Batt_Soc:%d.%d\n", cycle_count[0]/10, cycle_count[0]%10);
 	seq_printf(buf, "Sys_Soc:%d.%d\n", cycle_count[1]/10, cycle_count[1]%10);
 	seq_printf(buf, "Mono_Soc:%d.%d\n", cycle_count[2]/10, cycle_count[2]%10);
+	seq_printf(buf, "battery_total_time:%lu\n", g_cycle_count_data.battery_total_time);
+	seq_printf(buf, "high_temp_total_time:%lu\n", g_cycle_count_data.high_temp_total_time);
+	seq_printf(buf, "high_vol_total_time:%lu\n", g_cycle_count_data.high_vol_total_time);
+	seq_printf(buf, "high_temp_vol_time:%lu\n", g_cycle_count_data.high_temp_vol_time);
+	seq_printf(buf, "reload_condition:%d\n", g_cycle_count_data.reload_condition);
 
 	return 0;
 }
@@ -8742,12 +8853,160 @@ static int cycle_count_proc_open(struct inode *inode, struct file *file)
 {
 	return single_open(file, cycle_count_proc_show, NULL);
 }
+
+static void asus_judge_reload_condition(struct fg_chip *chip);
+static int write_test_value = 0;
+static ssize_t cycle_count_proc_write(struct file *file,const char __user *buffer,size_t count,loff_t *pos)
+{
+	int value=0;
+	unsigned long time = 0;
+	char buf[30] = {0};
+	size_t buf_size;
+	char *start = buf;
+
+	buf_size = min(count, (size_t)(sizeof(buf)-1));
+	if (copy_from_user(buf, buffer, buf_size)) {
+		pr_err("Failed to copy from user\n");
+		return -EFAULT;
+	}
+	buf[buf_size] = 0;
+
+	sscanf(start, "%d", &value);
+	while (*start++ != ' ');
+	sscanf(start, "%lu", &time);
+
+	write_test_value = value;
+
+	switch(value){
+		case 1:
+			g_cycle_count_data.battery_total_time = time;
+		break;
+		case 2:
+			g_cycle_count_data.charge_cap_accum[0] = (int)time;
+		break;
+		case 3:
+			g_cycle_count_data.high_temp_vol_time = time;
+		break;
+		case 4:
+			g_cycle_count_data.high_temp_total_time = time;
+		break;
+		case 5:
+			g_cycle_count_data.high_vol_total_time = time;
+		break;
+		default:
+			pr_info("input error!Now return\n");
+			return count;
+	}
+	asus_judge_reload_condition(chip_oem);
+	pr_info("value=%d;time=%lu\n", value, time);
+
+	return count;
+}
+
 static const struct file_operations cycle_count_fops = {
 	.owner = THIS_MODULE,
 	.open = cycle_count_proc_open,
 	.read = seq_read,
+	.write = cycle_count_proc_write,
 	.release = single_release,
 };
+
+static int condition_value_proc_show(struct seq_file *buf, void *data)
+{
+	if(!chip_oem){
+		pr_err("chip oem is NULL!");
+		return -1;
+	}
+
+	seq_printf(buf, "---show condition value---\n");
+	seq_printf(buf, "condition1 battery time %lu\n", chip_oem->condition1_battery_time);
+	seq_printf(buf, "condition2 battery time %lu\n", chip_oem->condition2_battery_time);
+	seq_printf(buf, "condition1 cycle count %d\n", chip_oem->condition1_cycle_count);
+	seq_printf(buf, "condition2 cycle count %d\n", chip_oem->condition2_cycle_count);
+	seq_printf(buf, "condition1 temp time %lu\n", chip_oem->condition1_temp_time);
+	seq_printf(buf, "condition2 temp time %lu\n", chip_oem->condition2_temp_time);
+	seq_printf(buf, "condition1 temp&vol time %lu\n", chip_oem->condition1_temp_vol_time);
+	seq_printf(buf, "condition2 temp&vol time %lu\n", chip_oem->condition2_temp_vol_time);
+	seq_printf(buf, "condition1 vol time %lu\n", chip_oem->condition1_vol_time);
+	seq_printf(buf, "condition2 vol time %lu\n", chip_oem->condition2_vol_time);
+
+	return 0;
+}
+
+static int condition_value_proc_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, condition_value_proc_show, NULL);
+}
+
+static ssize_t condition_value_proc_write(struct file *file,const char __user *buffer,size_t count,loff_t *pos)
+{
+	int value = 0;
+	unsigned long condition1_time = 0;
+	unsigned long condition2_time = 0;
+	char buf[count];
+	char *start = buf;
+
+	if(!chip_oem){
+		pr_err("chip oem is NULL!");
+		return count;
+	}
+
+	if (copy_from_user(buf, buffer, count-1)) {
+		pr_err("Failed to copy from user\n");
+		return -EFAULT;
+	}
+	buf[count] = 0;
+
+	sscanf(start, "%d", &value);
+	while (*start++ != ' ');
+	sscanf(start, "%lu", &condition1_time);
+	while (*start++ != ' ');
+	sscanf(start, "%lu", &condition2_time);
+
+	if(value && condition2_time <= condition1_time){
+		pr_info("input value error,please input correct value!\n");
+		return count;
+	}
+
+	switch(value){
+		case 0:
+			init_battery_safety(chip_oem);
+			g_cycle_count_data.reload_condition = 0;
+		break;
+		case 1:
+			chip_oem->condition1_battery_time = condition1_time;
+			chip_oem->condition2_battery_time = condition2_time;
+		break;
+		case 2:
+			chip_oem->condition1_cycle_count = (int)condition1_time;
+			chip_oem->condition2_cycle_count = (int)condition2_time;
+		break;
+		case 3:
+			chip_oem->condition1_temp_vol_time = condition1_time;
+			chip_oem->condition2_temp_vol_time = condition2_time;
+		break;
+		case 4:
+			chip_oem->condition1_temp_time = condition1_time;
+			chip_oem->condition2_temp_time = condition2_time;
+		break;
+		case 5:
+			chip_oem->condition1_vol_time = condition1_time;
+			chip_oem->condition2_vol_time = condition2_time;
+		break;
+	}
+
+	pr_info("value=%d;condition1_time=%lu;condition2_time=%lu\n", value, condition1_time, condition2_time);
+	return count;
+}
+
+static const struct file_operations condition_value_fops = {
+	.owner = THIS_MODULE,
+	.open = condition_value_proc_open,
+	.read = seq_read,
+	.write = condition_value_proc_write,
+	.release = single_release,
+};
+
 static void create_batt_cycle_count_proc_file(void)
 {
 	struct proc_dir_entry *asus_batt_cycle_count_dir = proc_mkdir("Batt_Cycle_Count", NULL);
@@ -8757,6 +9016,8 @@ static void create_batt_cycle_count_proc_file(void)
 		asus_batt_cycle_count_dir, &accum_soc_fops);
 	struct proc_dir_entry *asus_batt_full_cycle_thresh_proc_file = proc_create("full_cycle_thresh", 0666,
 		asus_batt_cycle_count_dir, &full_cycle_thresh_fops);
+	struct proc_dir_entry *asus_batt_safety_condition_proc_file = proc_create("condition_value", 0666,
+		asus_batt_cycle_count_dir, &condition_value_fops);
 	if (!asus_batt_cycle_count_dir)
 		printk("batt_cycle_count_dir create failed!\n");
 	if (!asus_batt_cycle_count_proc_file)
@@ -8765,6 +9026,8 @@ static void create_batt_cycle_count_proc_file(void)
 		printk("batt_accum_soc_proc_file create failed!\n");
 	if (!asus_batt_full_cycle_thresh_proc_file)
 		printk("batt_full_cycle_thresh_proc_file create failed!\n");
+	if (!asus_batt_safety_condition_proc_file)
+		printk(" create asus_batt_safety_condition_proc_file failed!\n");
 }
 /* ASUS_BSP steven1_wang: Add proc nodes for battery cycle count--- */
 
@@ -8797,6 +9060,324 @@ static ssize_t batt_switch_name(struct switch_dev *sdev, char *buf)
 	return sprintf(buf, "%s\n", g_battery_version);
 }
 
+static int asus_battery_profile_init_work(struct fg_chip *chip)
+{
+	int rc = 0;
+	int profile_val;
+	int batt_id;
+
+	if(!g_cyclecount_initialized) {
+		rc = init_batt_cycle_count();
+		if(rc < 0){
+			pr_err("init batt cycle count failed!\n");
+			return rc;
+		}
+	}
+
+	profile_val = g_cycle_count_data.reload_condition;
+	if(profile_val == 0){
+		return 0;
+	}
+
+	batt_id = get_sram_prop_now(chip, FG_DATA_BATT_ID)/1000;
+
+	pr_info("profile_val=%d;batt_id=%d\n", profile_val, batt_id);
+
+	if(!fg_batt_type){
+		pr_info("fg_batt_type is NULL,now malloc!\n");
+		fg_batt_type = kmalloc(100, GFP_KERNEL);
+		memset(fg_batt_type, 0, 100);
+	}
+
+	if(batt_id <= 10)
+		strcpy(fg_batt_type, asus_batt_type_str[profile_val]); //10k
+	else
+		strcpy(fg_batt_type, asus_batt_type_str[profile_val+3]); //100k
+
+   return rc;
+}
+
+static void asus_reload_battery_profile(struct fg_chip *chip, int value){
+	int batt_id = 0;
+
+	if(!fg_batt_type){
+		printk("%s:fg_batt_type is NULL,now malloc!\n", __func__);
+		fg_batt_type = kmalloc(100, GFP_KERNEL);
+		memset(fg_batt_type, 0, 100);
+	}
+
+	enable_float_vol = true;
+
+	batt_id = get_sram_prop_now(chip, FG_DATA_BATT_ID)/1000;
+
+	if(batt_id <= 10)
+		strcpy(fg_batt_type, asus_batt_type_str[value]);//10k
+	else
+		strcpy(fg_batt_type, asus_batt_type_str[value+3] ); //100k
+
+	//save current status
+	write_back_cycle_count_data();
+
+	fg_handle_battery_insertion(chip);
+
+	printk("new profile is %s;batt_id=%d;value=%d\n",fg_batt_type, batt_id, value);
+}
+
+extern bool asus_full_charger_judge(void);
+
+static void asus_judge_reload_condition(struct fg_chip *chip)
+{
+	int temp_condition = 0;
+	int temp;
+	int cycle_count = 0;
+	bool full_charge;
+	unsigned long local_high_vol_time = g_cycle_count_data.high_vol_total_time;
+	unsigned long local_high_temp_time = g_cycle_count_data.high_temp_total_time;
+	unsigned long local_high_temp_vol_time = g_cycle_count_data.high_temp_vol_time;
+	unsigned long local_battery_total_time = g_cycle_count_data.battery_total_time;
+
+	temp_condition = g_cycle_count_data.reload_condition;
+	if(temp_condition >= 2){ //if condition=2 will return
+		return ;
+	}
+
+	//only full charger can load new profile
+	full_charge = asus_full_charger_judge();
+	if(!full_charge)
+		return ;
+
+	//1.judge battery using total time
+	if(local_battery_total_time >= chip->condition2_battery_time){
+		g_cycle_count_data.reload_condition = 2;
+		goto DONE;
+	}else if(local_battery_total_time >= chip->condition1_battery_time &&
+		local_battery_total_time < chip->condition2_battery_time){
+		g_cycle_count_data.reload_condition = 1;
+	}
+
+	//2. judge battery cycle count
+	temp = g_cycle_count_data.charge_cap_accum[0];
+	cycle_count = DIV_ROUND_CLOSEST(temp * 100 * 10, 256 * g_full_cycle_thresh);
+	cycle_count = cycle_count/10;
+	if(cycle_count >= chip->condition2_cycle_count){
+		g_cycle_count_data.reload_condition = 2;
+		goto DONE;
+	}else if(cycle_count >= chip->condition1_cycle_count &&
+		cycle_count < chip->condition2_cycle_count){
+		g_cycle_count_data.reload_condition = 1;
+	}
+
+	//3. judge high temp and voltage condition
+	if(local_high_temp_vol_time >= chip->condition2_temp_vol_time){
+		g_cycle_count_data.reload_condition = 2;
+		goto DONE;
+	}else if(local_high_temp_vol_time >= chip->condition1_temp_vol_time &&
+		local_high_temp_vol_time < chip->condition2_temp_vol_time){
+		g_cycle_count_data.reload_condition = 1;
+	}
+
+	//4. judge high temp condition
+	if(local_high_temp_time >= chip->condition2_temp_time){
+		g_cycle_count_data.reload_condition = 2;
+		goto DONE;
+	}else if(local_high_temp_time >= chip->condition1_temp_time &&
+		local_high_temp_time < chip->condition2_temp_time){
+		g_cycle_count_data.reload_condition = 1;
+	}
+
+	//5. judge high voltage condition
+	if(local_high_vol_time >= chip->condition2_vol_time){
+		g_cycle_count_data.reload_condition = 2;
+	}else if(local_high_vol_time >= chip->condition1_vol_time &&
+		local_high_vol_time < chip->condition2_vol_time){
+		g_cycle_count_data.reload_condition = 1;
+	}
+
+DONE:
+	if(temp_condition != g_cycle_count_data.reload_condition)
+		asus_reload_battery_profile(chip, g_cycle_count_data.reload_condition);
+
+}
+
+unsigned long last_high_temp_time = 0;
+unsigned long last_high_vol_time = 0;
+unsigned long last_high_temp_vol_time = 0;
+extern unsigned long asus_qpnp_rtc_read_time(void);
+
+static void calculation_time_fun(int type)
+{
+	unsigned long now_time;
+	unsigned long temp_time = 0;
+
+	now_time = asus_qpnp_rtc_read_time();
+	if(now_time < 0){
+		pr_err("asus read rtc time failed!\n");
+		return ;
+	}
+
+	switch(type){
+		case HIGH_VOL_CAL_TYPE:
+			if(0 == last_high_vol_time){
+				last_high_vol_time = now_time;
+				pr_info("now_time=%lu;high_vol_total_time=%lu\n", now_time, g_cycle_count_data.high_vol_total_time);
+			}else{
+				temp_time = now_time - last_high_vol_time;
+				if(temp_time > 0)
+					g_cycle_count_data.high_vol_total_time += temp_time;
+				last_high_vol_time = now_time;
+			}
+		break;
+
+		case HIGH_TEMP_CAL_TYPE:
+			if(0 == last_high_temp_time){
+				last_high_temp_time = now_time;
+				pr_info("now_time=%lu;high_temp_total_time=%lu\n", now_time, g_cycle_count_data.high_temp_total_time);
+			}else{
+				temp_time = now_time - last_high_temp_time;
+				if(temp_time > 0)
+					g_cycle_count_data.high_temp_total_time += temp_time;
+				last_high_temp_time = now_time;
+			}
+		break;
+
+		case HIGH_TEMP_VOL_CAL_TYPE:
+			if(0 == last_high_temp_vol_time){
+				last_high_temp_vol_time = now_time;
+				pr_info("now_time=%lu;high_temp_vol_time=%lu\n", now_time, g_cycle_count_data.high_temp_vol_time);
+			}else{
+				temp_time = now_time - last_high_temp_vol_time;
+				if(temp_time > 0)
+					g_cycle_count_data.high_temp_vol_time += temp_time;
+				last_high_temp_vol_time = now_time;
+			}
+		break;
+	}
+}
+
+static void calculation_battery_time_fun(unsigned long time)
+{
+	static unsigned long last_time = 0;
+	unsigned long count_time = 0;
+
+	if(last_time > 0){
+		count_time = ((time-last_time)>0) ? (time-last_time):0;
+		g_cycle_count_data.battery_total_time += count_time;
+		last_time = time;
+		return ;
+	}
+
+	if(g_cycle_count_data.battery_total_time <= time){
+		 g_cycle_count_data.battery_total_time = time;
+	}else{//add up time when pull out the battery
+		g_cycle_count_data.battery_total_time += time;
+	}
+	pr_info("time=%lu;battery_total_time=%lu\n", time,g_cycle_count_data.battery_total_time);
+	last_time = time;
+}
+
+static void update_battery_safe(struct fg_chip *chip)
+{
+	int temp;
+	int capacity;
+	unsigned long now_time;
+
+	temp = get_sram_prop_now(chip, FG_DATA_BATT_TEMP);
+	capacity = get_prop_capacity(chip);
+
+	now_time = asus_qpnp_rtc_read_time();
+	if(now_time < 0){
+		pr_err("asus read rtc time failed!\n");
+		return ;
+	}
+
+	if(write_test_value != 1){ //skip battery time test
+		calculation_battery_time_fun(now_time);
+	}
+
+	if(capacity == FULL_CAPACITY_VALUE){
+		calculation_time_fun(HIGH_VOL_CAL_TYPE);	
+	}else{
+		last_high_vol_time = 0; //exit high vol
+	}
+
+	if(temp >= HIGHER_TEMP){
+		calculation_time_fun(HIGH_TEMP_CAL_TYPE);
+	}else{
+		last_high_temp_time = 0; //exit high temp
+	}
+
+	if(temp >= HIGH_TEMP && capacity == FULL_CAPACITY_VALUE){
+		calculation_time_fun(HIGH_TEMP_VOL_CAL_TYPE);
+	}else{
+		last_high_temp_vol_time = 0; //exit high temp and vol
+	}
+
+	asus_judge_reload_condition(chip);
+}
+
+static ssize_t battery_profile_proc_write(struct file *file,const char __user *buffer,size_t count,loff_t *pos)
+{
+	int new_condition;
+	if(!chip_oem){
+		pr_err("chip_oem is NULL!\n");
+		return count;
+	}
+
+	sscanf(buffer,"%d", &new_condition);
+
+	if(new_condition == 0){
+		write_test_value = 0;
+		g_cycle_count_data.reload_condition = new_condition;
+		g_cycle_count_data.high_temp_total_time = 0;
+		g_cycle_count_data.high_temp_vol_time = 0;
+		g_cycle_count_data.high_vol_total_time = 0;
+		g_cycle_count_data.battery_total_time = 0;
+		memset(g_cycle_count_data.charge_cap_accum, 0, ARRAY_SIZE(g_cycle_count_data.charge_cap_accum));
+		asus_reload_battery_profile(chip_oem, new_condition);
+	}
+
+	if(g_cycle_count_data.reload_condition == 2)
+		goto DONE;
+
+	if(new_condition == 1 || new_condition == 2){
+		enable_float_vol = true;
+		g_cycle_count_data.reload_condition = new_condition;
+		asus_reload_battery_profile(chip_oem, new_condition);
+	}
+DONE:
+	printk("new condition is %d;old condition=%d\n", new_condition, g_cycle_count_data.reload_condition);
+
+	return count;
+}
+
+static int battery_profile_proc_show(struct seq_file *buf, void *data)
+{
+	seq_printf(buf, "%s\n", fg_batt_type);
+	printk("profile name = %s\n", fg_batt_type);
+	return 0;
+}
+
+static int battery_profile_proc_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, battery_profile_proc_show, NULL);
+}
+
+static const struct file_operations battery_profile_fops = {
+	.owner = THIS_MODULE,
+	.open = battery_profile_proc_open,
+	.read = seq_read,
+	.write = battery_profile_proc_write,
+	.release = single_release,
+};
+static void create_battery_profile_proc_file(void)
+{
+
+	struct proc_dir_entry *battery_profile_proc_file = proc_create("battery_profile", 0666,NULL,&battery_profile_fops);
+
+	if (!battery_profile_proc_file)
+		printk("battery_profile_proc_file create failed!\n");
+}
+
 static int fg_probe(struct spmi_device *spmi)
 {
 	struct device *dev = &(spmi->dev);
@@ -8825,13 +9406,15 @@ static int fg_probe(struct spmi_device *spmi)
 	chip->spmi = spmi;
 	chip->dev = &(spmi->dev);
 	chip_oem = chip;
-	
+
 	/* register switch device for battery information versions report */
 	batt_dev.name = "battery";
 	batt_dev.print_name = batt_switch_name;
 	if (switch_dev_register(&batt_dev) < 0) {
 		printk("%s: fail to register battery switch\n", __FUNCTION__);
 	}
+
+	init_battery_safety(chip);
 
 	create_gauge_proc_file();
 
@@ -9042,7 +9625,7 @@ static int fg_probe(struct spmi_device *spmi)
 	/* Fake temperature till the actual temperature is read */
 	chip->last_good_temp = 250;
 	schedule_work(&chip->init_work);
-
+	create_battery_profile_proc_file();
 	pr_info("FG Probe success - FG Revision DIG:%d.%d ANA:%d.%d PMIC subtype=%d\n",
 		chip->revision[DIG_MAJOR], chip->revision[DIG_MINOR],
 		chip->revision[ANA_MAJOR], chip->revision[ANA_MINOR],

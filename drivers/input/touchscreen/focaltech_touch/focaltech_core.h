@@ -80,7 +80,9 @@
 *****************************************************************************/
 #define LEN_FLASH_ECC_MAX                   0xFFFE
 
+#if 0
 #define FTS_WORKQUEUE_NAME                  "fts_wq"
+#endif
 
 #define FTS_KEY_WIDTH                       50
 #define FTS_ONE_TCH_LEN                     6
@@ -151,6 +153,11 @@ struct fts_ts_data {
     struct workqueue_struct *ts_workqueue;
     struct regulator *vdd;
     struct regulator *vcc_i2c;
+//<Focal driver-team libaojian 20170828> add define about irq_lock and mutex ++++++
+    spinlock_t irq_lock;
+	bool irq_disable;
+    struct mutex report_mutex;
+//<Focal driver-team libaojian 20170828> add define about irq_lock and mutex -------
     u16 addr;
     bool suspended;
     u8 fw_ver[3];

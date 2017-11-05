@@ -458,15 +458,21 @@ static long gf_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		input_sync(gf_dev->input);
 	}
 #else
-// diable fp home fuction when press back and menu key ++++
+
 		for(i = 0; i< ARRAY_SIZE(key_map); i++) {
 			if(key_map[i].val == gf_key.key){
+
+				//add a delay between FRINGERPRINT_DTAP keydown and FRINGERPRINT_DTAP keyup.(FRINGERPRINT_DTAP is KEY EARLYWAKEUP)
+				if((gf_key.key ==  FRINGERPRINT_DTAP) &&(gf_key.value == 0)){
+					msleep(30);
+				}
+
 				input_report_key(gf_dev->input, gf_key.key, gf_key.value);
 				input_sync(gf_dev->input);
 				break;
 			}
 		}
-// diable fp home fuction when press back and menu key ++++
+
 
 #endif
                 if(i == ARRAY_SIZE(key_map)) {
