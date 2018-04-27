@@ -76,6 +76,48 @@ const char *i2c_msm_err_str_table[] = {
 	[I2C_MSM_ERR_OVR_UNDR_RUN] = "OVER_UNDER_RUN_ERROR",
 };
 
+//<ASUS_BSP Hank2_Liu 20171122> Remove CM36656 I2c error Log +++
+static void i2c_msm_dbg_dump_diag_CM36656(struct i2c_msm_ctrl *ctrl,
+				bool use_param_vals, u32 status, u32 qup_op)
+{
+	struct i2c_msm_xfer *xfer = &ctrl->xfer;
+	const char *str = i2c_msm_err_str_table[xfer->err];
+	char buf[I2C_MSM_REG_2_STR_BUF_SZ];
+
+	if (!use_param_vals) {
+		void __iomem        *base = ctrl->rsrcs.base;
+		status = readl_relaxed(base + QUP_I2C_STATUS);
+		qup_op = readl_relaxed(base + QUP_OPERATIONAL);
+	}
+
+	if (xfer->err == I2C_MSM_ERR_TIMEOUT) {
+		/*
+		 * if we are not the bus master or SDA/SCL is low then it may be
+		 * that slave is pulling the lines low. Otherwise it is likely a
+		 * GPIO issue
+		 */
+		if (!(status & QUP_BUS_MASTER))
+			snprintf(buf, I2C_MSM_REG_2_STR_BUF_SZ,
+				"%s(val:%dmsec) misconfigured GPIO or slave pulling bus line(s) low\n",
+				str, jiffies_to_msecs(xfer->timeout));
+		 else
+			snprintf(buf, I2C_MSM_REG_2_STR_BUF_SZ,
+			"%s(val:%dmsec)", str, jiffies_to_msecs(xfer->timeout));
+
+		str = buf;
+	}
+
+	/* dump xfer details */
+	/*dev_err(ctrl->dev,
+		"%s: msgs(n:%d cur:%d %s) bc(rx:%zu tx:%zu) mode:%s slv_addr:0x%0x MSTR_STS:0x%08x OPER:0x%08x\n",
+		str, xfer->msg_cnt, xfer->cur_buf.msg_idx,
+		xfer->cur_buf.is_rx ? "rx" : "tx", xfer->rx_cnt, xfer->tx_cnt,
+		i2c_msm_mode_str_tbl[xfer->mode_id], xfer->msgs->addr,
+		status, qup_op);*/
+}
+//<ASUS_BSP Hank2_Liu 20171122> Remove CM36656 I2c error Log ---
+
+
 static void i2c_msm_dbg_dump_diag(struct i2c_msm_ctrl *ctrl,
 				bool use_param_vals, u32 status, u32 qup_op)
 {
@@ -1848,7 +1890,10 @@ static irqreturn_t i2c_msm_qup_isr(int irq, void *devid)
 	}
 
 isr_end:
-	if (ctrl->xfer.err || (ctrl->dbgfs.dbg_lvl >= MSM_DBG))
+//<ASUS_BSP Hank2_Liu 20171122> Remove CM36656 I2c error Log 
+	if(ctrl->xfer.err  && ctrl->adapter.nr  == 6 && asus_project_id == 2){ //Project=Phoenix,I2c=6,CM36656
+		i2c_msm_dbg_dump_diag_CM36656(ctrl, true, i2c_status, qup_op);
+	}else if(ctrl->xfer.err || (ctrl->dbgfs.dbg_lvl >= MSM_DBG))
 		i2c_msm_dbg_dump_diag(ctrl, true, i2c_status, qup_op);
 
 	if (log_event || (ctrl->dbgfs.dbg_lvl >= MSM_DBG))
@@ -1941,6 +1986,30 @@ static int qup_i2c_try_recover_bus_busy(struct i2c_msm_ctrl *ctrl)
 	return ret;
 }
 
+//<ASUS_BSP Hank2_Liu 20171122> Remove CM36656 I2c error Log +++
+static int qup_i2c_recover_bus_busy_CM36656(struct i2c_msm_ctrl *ctrl)
+{
+	u32 bus_clr, bus_active, status;
+	int retry = 0;
+	//dev_info(ctrl->dev, "Executing bus recovery procedure (9 clk pulse)\n");
+
+	do {
+		qup_i2c_try_recover_bus_busy(ctrl);
+		bus_clr    = readl_relaxed(ctrl->rsrcs.base +
+							QUP_I2C_MASTER_BUS_CLR);
+		status     = readl_relaxed(ctrl->rsrcs.base + QUP_I2C_STATUS);
+		bus_active = status & I2C_STATUS_BUS_ACTIVE;
+		if (++retry >= I2C_QUP_MAX_BUS_RECOVERY_RETRY)
+			break;
+	} while (bus_clr || bus_active);
+
+	/*dev_info(ctrl->dev, "Bus recovery %s after %d retries\n",
+		(bus_clr || bus_active) ? "fail" : "success", retry);*/
+	return 0;
+}
+//<ASUS_BSP Hank2_Liu 20171122> Remove CM36656 I2c error Log ---
+
+
 static int qup_i2c_recover_bus_busy(struct i2c_msm_ctrl *ctrl)
 {
 	u32 bus_clr, bus_active, status;
@@ -1978,8 +2047,8 @@ static int i2c_msm_qup_post_xfer(struct i2c_msm_ctrl *ctrl, int err)
 		}
 	}
          if(ctrl->xfer.err == I2C_MSM_ERR_ARB_LOST && ctrl->adapter.nr  == 6 && asus_project_id == 2){
-		 	        printk("[Phoenix] i2c-6  solve ARBLOST by EE's requirement\n");
-				qup_i2c_recover_bus_busy(ctrl);
+		 	        //printk("[Phoenix] i2c-6  solve ARBLOST by EE's requirement\n");
+				qup_i2c_recover_bus_busy_CM36656(ctrl);
                         	}
 	/*
 	 * Disable the IRQ before change to reset state to avoid

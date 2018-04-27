@@ -1247,7 +1247,10 @@ EXPORT_SYMBOL(ASUSErclog);
 static ssize_t evtlogswitch_write(struct file *file, const char __user *buf, size_t count, loff_t *ppos)
 {
 	ulong *printk_buffer_slot2_addr;
-	if(strncmp(buf, "0", 1) == 0) {
+	memset(messages, 0, sizeof(messages));
+	if (copy_from_user(messages, buf, count))
+		return -EFAULT;
+	if(strncmp(messages, "0", 1) == 0) {
 		ASUSEvtlog("[ASDF] ASUSEvtlog disable !!");
 		printk("ASUSEvtlog disable !!\n");
 		flush_work(&eventLog_Work);
@@ -1255,7 +1258,7 @@ static ssize_t evtlogswitch_write(struct file *file, const char __user *buf, siz
 		printk_buffer_slot2_addr = (ulong *)PRINTK_BUFFER_SLOT2;
 		(*printk_buffer_slot2_addr) = 0;
 	}
-	if (strncmp(buf, "1", 1) == 0) {
+	if (strncmp(messages, "1", 1) == 0) {
 		g_bEventlogEnable = 1;
 		ASUSEvtlog("[ASDF] ASUSEvtlog enable !!");
 		printk("ASUSEvtlog enable !!\n");

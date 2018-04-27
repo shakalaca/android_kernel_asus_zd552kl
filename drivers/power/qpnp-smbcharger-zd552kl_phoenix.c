@@ -6567,6 +6567,7 @@ static enum power_supply_property smbchg_battery_properties[] = {
 	POWER_SUPPLY_PROP_RESTRICTED_CHARGING,
 	POWER_SUPPLY_PROP_ALLOW_HVDCP3,
 	POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN,
+	POWER_SUPPLY_PROP_CHARGE_COUNTER,
 };
 
 #define FAKE_TEMPERATURE_INVAL -999
@@ -6782,6 +6783,7 @@ static int smbchg_battery_get_property(struct power_supply *psy,
 		val->intval = chip->allow_hvdcp3_detection;
 		break;
 	case POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN:
+	case POWER_SUPPLY_PROP_CHARGE_COUNTER:
 		val->intval =3000;
 		break;
 	default:
@@ -7222,7 +7224,7 @@ static irqreturn_t usbin_uv_handler(int irq, void *_chip)
 	else
 		complete_all(&chip->usbin_uv_lowered);
 
-	if (chip->hvdcp_3_det_ignore_uv)
+	if (chip->hvdcp_3_det_ignore_uv || chip->sdp_3s_rerun_ignore)
 		goto out;
 
 	if ((reg & USBIN_UV_BIT) && (reg & USBIN_SRC_DET_BIT)) {
@@ -10105,18 +10107,21 @@ void Set_COS_APSD_FLASE_work(struct work_struct *work)
 
 extern void dpNotify(void)
 {
-	int rc;
+//	int rc;
 	if(smb_charger_dev){
 		if((!smb_charger_dev->cdp_rerun) 
 			 &&(smb_charger_dev->usb_supply_type ==POWER_SUPPLY_TYPE_USB)){
 				printk("%s: D+ Notify called. Rerun_APSD\n",__func__);
 				smb_charger_dev->cdp_rerun = true;
 				COS_APSD =true;
+				/*
 				rc = smbchg_masked_write(smb_charger_dev, smb_charger_dev->usb_chgpth_base + USB_CMD_APSD,
 								APSD_RERUN, APSD_RERUN);
 				if (rc){
 					pr_err("Couldn't re-run APSD rc=%d\n", rc);
-				}
+				}*/
+				cancel_delayed_work_sync(&smb_charger_dev->asus_sdp_det_work);
+				schedule_delayed_work(&smb_charger_dev->asus_sdp_det_work, 0);
 				if (g_Charger_mode) 
 					schedule_delayed_work(&Set_COS_APSD_work, 2*HZ);
 		}
@@ -10124,6 +10129,7 @@ extern void dpNotify(void)
 
 	if(smb_charger_dev->usb_supply_type !=POWER_SUPPLY_TYPE_USB){
 			printk("[CHARGE] not sdp, but phy has ok, not need rerun any more\n");
+			cancel_delayed_work_sync(&smb_charger_dev->asus_sdp_det_work);
 			if(smb_charger_dev->cdp_rerun ==0)
 				smb_charger_dev->cdp_rerun =1;
 	}
@@ -11689,7 +11695,9 @@ static int smbchg_probe(struct spmi_device *spmi)
 		dev_err(&chip->spmi->dev,"failed to get thermal adc(%d)\n", rc);
 	}
 
-	rerun_hvdcp_det_if_necessary(chip);
+	if(!chip->hvdcp_not_supported)
+		rerun_hvdcp_det_if_necessary(chip);
+
 	chip->read_adc_work_done=false;
 	//chip->do_pre_config=false;
 	schedule_delayed_work(&chip->battery_poll_data_work, 30 * HZ);

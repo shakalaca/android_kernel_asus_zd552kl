@@ -2466,6 +2466,33 @@ static struct attribute *rgb_sysfs_attrs[] = {
 static struct attribute_group rgb_attribute_group = {
 	.attrs = rgb_sysfs_attrs,
 };
+
+static ssize_t ps_status_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	int ret;
+	struct cm36656_info *lpi = lp_info;
+	int val;
+       uint16_t ps_data = 0;
+	int old_status = lpi->ps_enable;;
+	
+	psensor_enable(lpi);
+	get_ps_adc_value(&ps_data);
+
+    val = (ps_data >= lpi->ps_close_thd_set) ? 1 : 0;
+ 	 // ret  = _CM36283_I2C_Read_Word(lpi->slave_addr, INT_FLAG, &thd); 
+
+	    D("[PS][CM36283]INT_FLAG = 0x%x\n", ps_data);
+		
+	ret = sprintf(buf, "%x", val);
+	if(!old_status){
+		psensor_disable(lpi); //recover psensor status
+	}
+	
+	return ret;
+	
+}
+
+
 //asus alex_wang rgb porting-----
 static struct device_attribute dev_attr_ps_calling =
 __ATTR(ps_calling, 0444, ps_calling_show, ps_calling_store);//asus alex wang 20170424 calling status
@@ -2485,6 +2512,11 @@ __ATTR(ps_thd, 0664, ps_thd_show, ps_thd_store);
 static struct device_attribute dev_attr_ps_canc = 	
 __ATTR(ps_canc, 0664, ps_canc_show, ps_canc_store);
 
+static struct device_attribute dev_attr_ps_status = 	
+__ATTR(ps_status, 0664, ps_status_show, NULL);
+
+
+
 static struct attribute *proximity_sysfs_attrs[] = {
 	&dev_attr_ps_adc.attr,
 	&dev_attr_ps_enable.attr,
@@ -2492,6 +2524,7 @@ static struct attribute *proximity_sysfs_attrs[] = {
 	&dev_attr_ps_thd.attr,
 	&dev_attr_ps_canc.attr,
 	&dev_attr_ps_calling.attr,
+	&dev_attr_ps_status.attr,
 	NULL
 };
 
@@ -3273,6 +3306,10 @@ lpi->cs_dev = device_create(lpi->cm36656_class,
 	if (ret)
 		goto err_create_ps_device_file;
 	ret = device_create_file(lpi->ps_dev, &dev_attr_ps_canc);
+	if (ret)
+		goto err_create_ps_device_file;
+
+	ret = device_create_file(lpi->ps_dev, &dev_attr_ps_status);
 	if (ret)
 		goto err_create_ps_device_file;
 //asus alex_wang device create file to debug------

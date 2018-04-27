@@ -981,12 +981,13 @@ CSID_TG:
 	//asus bsp ralf:porting camera sensor related proc files>>
 	create_sensor_proc_files(s_ctrl,slave_info);
 	//asus bsp ralf:porting camera sensor related proc files<<
-	
+
 	/*
 	 * Set probe succeeded flag to 1 so that no other camera shall
 	 * probed on this slot
 	 */
 	s_ctrl->is_probe_succeed = 1;
+	
 	return rc;
 
 camera_power_down:
